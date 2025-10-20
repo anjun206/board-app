@@ -419,7 +419,7 @@ async def create_comment(pid: str, c: CommentIn, current=Depends(get_current_use
         "author_id": str(current["_id"]),
         "author_username": current["username"],
         "body": c.body,
-        "created_at": datetime.now(timezone.utc)(),
+        "created_at": datetime.now(timezone.utc),
     }
     res = await comments.insert_one(doc)
     await posts.update_one({"_id": oid}, {"$inc": {"comments_count": 1}})
