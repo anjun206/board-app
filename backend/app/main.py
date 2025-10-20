@@ -1,10 +1,10 @@
 # 표준 라이브러리
-import os                                     # 환경변수 읽기용 표준모듈
-from datetime import datetime, timedelta      # 토큰 만료 등 시간 계산
-from typing import Optional, List             # 타입힌트
+import os                                           # 환경변수 읽기용 표준모듈
+from datetime import datetime, timedelta, timezone  # 토큰 만료 등 시간 계산
+from typing import Optional, List                   # 타입힌트
 
 # FastAPI 본체와 에러 응답 도우미
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Response, Request
 
 # 브라우저(프론트엔드)에서 오는 요청을 허용하기 위한 CORS 미들웨어
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +25,7 @@ from jose import jwt, JWTError                        # JWT 인코딩/디코딩
 
 from pymongo.errors import DuplicateKeyError
 
+import uuid
 
 # -----------------------------
 # 환경 변수 / 기본 설정
@@ -43,6 +44,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 # Swagger의 Authorize 버튼이 토큰을 가져오는 주소를 지정
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
 # 비밀번호 해싱 설정(bcrypt)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -56,6 +59,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173"],
     allow_methods=["*"],   # GET/POST/PUT/DELETE 등 전부 허용
     allow_headers=["*"],   # 모든 헤더 허용(예: Content-Type)
+    allow_credentials=True,
 )
 
 
@@ -80,10 +84,15 @@ def verify_password(plain: str, hashed: str) -> bool:  # 평문과 해시 비교
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()                                  # 페이로드 복사
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})                        # 만료시간 포함
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)  # 서명하여 토큰 발급
 
+def create_refresh_token(data: dict, expires_days: int = REFRESH_TOKEN_EXPIRE_DAYS) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(days=expires_days)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 # -----------------------------
 # Pydantic 모델(스키마)
@@ -221,7 +230,7 @@ async def signup(u: UserCreate):
         "email": u.email,
         "username": u.username,
         "password_hash": hash_password(u.password),
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
     }
     res = await users.insert_one(doc)                              # insert
     saved = await users.find_one({"_id": res.inserted_id})         # 방금 저장한 문서 로드
@@ -233,10 +242,10 @@ class LoginBody(BaseModel):                                        # JSON 로그
 
 @app.post("/auth/login", response_model=TokenOut)                  # JSON 로그인(프론트에서 사용)
 async def login(body: LoginBody):
-    user = await users.find_one({"email": body.email})             # 이메일로 사용자 조회
+    user = await users.find_one({"email": body.email})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="invalid email or password")
-    token = create_access_token({"sub": str(user["_id"])})         # JWT 발급(sub=사용자ID)
+    token = create_access_token({"sub": str(user["_id"])})  # ← 여기!
     return TokenOut(access_token=token, user=user_to_out(user))
 
 @app.post("/auth/token", response_model=TokenOut)                  # Swagger Authorize 전용(폼)
@@ -247,6 +256,39 @@ async def issue_token(form: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=401, detail="invalid email/username or password")
     token = create_access_token({"sub": str(user["_id"])})
     return TokenOut(access_token=token, user=user_to_out(user))
+
+@app.post("/auth/refresh", response_model=TokenOut)
+async def refresh_token(request: Request, response: Response):
+    rt = request.cookies.get("refresh_token")
+    if not rt:
+        raise HTTPException(401, "no refresh token")
+    
+    try:
+        payload = jwt.decode(rt, SECRET_KEY, algorithms=[ALGORITHM])
+        uid: str = payload.get("sub")
+        ver: int = payload.get("ver", 0)
+    except JWTError:
+        raise health(401, "invalid refresh token")
+    
+    user = await users.find_one({"_id": ObjectId(uid)})
+    if not user:
+        raise HTTPException(401, "user not found")
+    
+    if user.get("token_version", 0) != ver:
+        raise HTTPException(401, "refresh token revoked")
+    
+    # 필요하면 여기서 리프레시 토큰 회전(jti 새로 발급 & 쿠키 교체)
+    access = create_access_token({"sub": str(user["_id"])})
+    return TokenOut(access_token=access, user=user_to_out(user))
+
+@app.post("/auth/logout")
+async def logout(response: Response, current=Depends(get_current_user)):
+    # token_version 증가 -> 이전 refresh 무효화
+    await users.update_one({"_id": current["_id"]}, {"$inc": {"token_version": 1}})
+
+    # 쿠키 제거
+    response.delete_cookie("refresh_token", path="/")
+    return {"ok": True}
 
 @app.get("/auth/me", response_model=UserOut)                       # 내 정보(토큰 필요)
 async def me(current=Depends(get_current_user)):
@@ -266,7 +308,7 @@ async def create_post(p: PostIn, current=Depends(get_current_user)):
         **p.dict(),
         "author_id": str(current["_id"]),       # ← 필수
         "author_username": current["username"], # (옵션) 목록/상세에 닉 표시용
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
         "comments_count": 0,
         "likes": [],
     }
@@ -274,13 +316,20 @@ async def create_post(p: PostIn, current=Depends(get_current_user)):
     doc = await posts.find_one({"_id": res.inserted_id})
     return post_to_out(doc)
 
+@app.get("/posts/count")
+async def posts_cout():
+    try:
+        total = await posts.count_documents({})
+    except Exception:
+        total = await posts.estimated_document_count()
+    return {"total": int(total)}
+
 @app.get("/posts/{pid}", response_model=PostOut)                   # 단건 조회(공개)
 async def get_post(pid: str):
     doc = await posts.find_one({"_id": ObjectId(pid)})
     if not doc:
         raise HTTPException(404, "not found")
     return post_to_out(doc)
-
 
 @app.put("/posts/{pid}", response_model=PostOut)                   # 수정(로그인 필요)
 async def update_post(pid: str, p: PostIn, current=Depends(get_current_user)):
@@ -370,7 +419,7 @@ async def create_comment(pid: str, c: CommentIn, current=Depends(get_current_use
         "author_id": str(current["_id"]),
         "author_username": current["username"],
         "body": c.body,
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc)(),
     }
     res = await comments.insert_one(doc)
     await posts.update_one({"_id": oid}, {"$inc": {"comments_count": 1}})

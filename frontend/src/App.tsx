@@ -1,12 +1,22 @@
-import React, { useEffect, useState } from "react";   // React 훅 임포트
+import React, { useEffect, useRef, useState } from "react";   // React 훅 임포트
 import { Link, useSearchParams } from "react-router-dom";
 
-/**
- * API 서버 주소
- * - Vite에서는 .env 혹은 docker-compose의 환경변수를 통해 VITE_* 값을 주입할 수 있음
- * - 설정이 없으면 http://localhost:8000 으로 기본값
- */
-const API = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+// lib/api 래퍼/도우미 사용
+import {
+  API_BASE,
+  listPosts,
+  createPost as apiCreatePost,
+  signup as apiSignup,
+  login as apiLogin,
+  me as apiMe,
+  getToken as getStoredToken,
+  setToken as saveToken,   // ← 저장용(로컬스토리지) 별칭
+  countPosts
+} from "./lib/api";
+
+import {
+  useElementWidth
+} from "./utils/useElementWidth"
 
 /**
  * 백엔드가 반환하는 글의 타입(간단 버전)
@@ -37,7 +47,7 @@ export default function App() {
   const [body, setBody] = useState("");           // 입력폼: 내용
 
   // ---- 인증 상태 ----
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem("token")); // LocalStorage에서 복구
+  const [token, setTokenState] = useState<string | null>(() => getStoredToken());
   const [me, setMe] = useState<User | null>(null);           // 현재 로그인 사용자
 
   // ---- 로그인/회원가입 폼 ----
@@ -50,7 +60,9 @@ export default function App() {
 
   const [hasMore, setHasMore] = useState(false);
 
+  // 페이지/페이지당
   const [searchParams, setSearchParams] = useSearchParams();
+
   const pageFromQS = parseInt(searchParams.get("page") ?? "1", 10);
   const page = Number.isFinite(pageFromQS) && pageFromQS > 0 ? pageFromQS : 1;
 
@@ -60,10 +72,31 @@ export default function App() {
   const pagesFromQS = parseInt(searchParams.get("pages") ?? "10", 10);
   const displayPageNum = Number.isFinite(pagesFromQS) && pagesFromQS > 0 ? pagesFromQS : 10;
 
-  const startPage = Math.floor((page - 1) / displayPageNum) * displayPageNum + 1;
-  const endPage = startPage + displayPageNum - 1;
+  // 총 개수 & 마지막 페이지
+  const [total, setTotal] = useState(0);
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
 
-  const [hasNextWindow, setHasNextWindow] = useState(false);
+  // 페이지 버튼 컨테이너 너비
+  const pagerRef = useRef<HTMLDivElement>(null);
+  const width = useElementWidth(pagerRef);
+
+  // 버튼 한 개의 대략 너비(패딩/보더 포함)와 좌우 화살표 여유 폭
+  const BUTTON_W = 44;          // 필요하면 조정
+  const ARROWS_W = 96;          // "← →" 두 개 + 여백 대략치
+  const GAP_W = 8;
+
+  // 보여줄 버튼 개수(최소 3, 최대 15로 클램프)
+  const buttonsToShow = Math.max(
+    3,
+    Math.min(15, Math.floor((width - ARROWS_W) / (BUTTON_W + GAP_W)) || 7)
+  );
+
+  // 현재 묶음의 시작/끝 (동적 개수 기반)
+  const startPage = Math.floor((page - 1) / buttonsToShow) * buttonsToShow + 1;
+  const endPage = Math.min(startPage + buttonsToShow - 1, lastPage);
+
+  const hasPrevWindow = startPage > 1;
+  const hasNextWindow = endPage < lastPage;
 
   /**
    * 글 목록 로드
@@ -71,71 +104,59 @@ export default function App() {
    */
   async function loadPosts(pg = 1, ps = pageSize) {
     const skip = (pg - 1) * ps;
-    const res = await fetch(`${API}/posts?skip=${skip}&limit=${ps}`);
-    const data = await res.json();
+    const data = await listPosts(skip, ps);
     setPosts(data);
-    setHasMore(Array.isArray(data) && data.length === ps); // 꽉 차면 다음 페이지가 있을 가능성
+    // setHasMore(Array.isArray(data) && data.length === ps);
   }
 
-  async function fetchMe(tok: string) {
-    const res = await fetch(`${API}/auth/me`, {
-      headers: { Authorization: `Bearer ${tok}` },
-    });
-    if (res.ok) setMe(await res.json());
-    else setMe(null);
+  async function loadTotal() {
+    setTotal(await countPosts());
   }
 
   useEffect(() => {
     loadPosts(page, pageSize);
   }, [page, pageSize]);
 
-  useEffect(() => {
-    const probe = async () => {
-      const skip = endPage * pageSize; // (endPage+1)번째 페이지의 첫 아이템
-      const res = await fetch(`${API}/posts?skip=${skip}&limi=1`);
-      try {
-        const data = await res.json();
-        setHasNextWindow(Array.isArray(data) && data.length > 0);
-      } catch {
-        setHasNextWindow(false);
-      }
-    };
-    probe();
-  }, [endPage, pageSize]);
+  // 최초 진입 & 신규 글 작성 후 총 개수 갱신
+  useEffect(() => { loadTotal(); }, []);
 
-  useEffect(() => {                                          // 마운트/토큰변경 시 실행
-    if (token) fetchMe(token);
-    else setMe(null);
+  // 현재 page가 lastPage를 넘어가면 lastPage로 밀착
+  useEffect(() => {
+    if (page > lastPage) {
+      setSearchParams({ page: String(lastPage), perPage: String(pageSize) });
+    }
+  }, [lastPage, page, pageSize, setSearchParams]);
+
+  // 토큰 변동/401 자동 로그아웃
+  useEffect(() => {
+    const run = async () => setMe(token ? await apiMe() : null);
+    run();
+    const onLogout = () => {
+      setTokenState(null);
+      setMe(null);
+      alert("세션이 만료되어 로그아웃되었습니다. 다시 로그인해 주세요.");
+    };
+    window.addEventListener("auth:logout", onLogout as EventListener);
+    return () => window.removeEventListener("auth:logout", onLogout as EventListener);
   }, [token]);
 
   // 글 등록(로그인 필요)
   async function create(e: React.FormEvent) {
-    e.preventDefault();                                      // 폼 기본 제출 막기
-    if (!authed) return;                                     // 미로그인 가드
-    await fetch(`${API}/posts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,                    // ★ 토큰 첨부
-      },
-      body: JSON.stringify({ title, body }),
-    });
-    setTitle(""); setBody("");                               // 입력 초기화
-    setSearchParams({ page: "1", perPage: String(pageSize), pages: String(displayPageNum) });                          // 1페이지로 이동 (URL 쿼리 갱신)
-    await loadPosts(1);
+    e.preventDefault();
+    if (!token) return;
+    await apiCreatePost(title, body);
+    setTitle(""); setBody("");
+    await Promise.all([loadPosts(1, pageSize), loadTotal()]);
+    setSearchParams({ page: "1", perPage: String(pageSize) });
   }
 
   // 회원가입
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
-    const res = await fetch(`${API}/auth/signup`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, username, password }),   // 가입 정보
-    });
+    const res = await apiSignup(email, username, password);
     if (res.ok) {
-      alert("회원가입 완료 로그인 해주세요");
-      setMode("login");                                      // 로그인 탭으로 전환
+      alert("회원가입 완료! 로그인해 주세요.");
+      setMode("login");
     } else {
       alert("회원가입 실패");
     }
@@ -144,23 +165,21 @@ export default function App() {
   // 로그인(JSON)
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    const res = await fetch(`${API}/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),             // 이메일/비밀번호
-    });
-    if (!res.ok) return alert("로그인 실패");
-    const data: TokenResp = await res.json();                // 토큰 + 유저 정보
-    localStorage.setItem("token", data.access_token);        // 브라우저에 저장
-    setToken(data.access_token);                             // 상태 반영
-    setMe(data.user);                                        // 사용자 표시
-    setEmail(""); setPassword("");                           // 폼 초기화
+    try {
+      const data = await apiLogin(email, password); // api.ts가 토큰 저장까지 수행
+      saveToken(data.access_token);
+      setTokenState(data.access_token);             // 상태만 반영
+      setMe(data.user);
+      setEmail(""); setPassword("");
+    } catch {
+      alert("로그인 실패");
+    }
   }
 
   // 로그아웃
   function logout() {
-    localStorage.removeItem("token");                        // 토큰 제거
-    setToken(null);
+    saveToken(null);
+    setTokenState(null);
     setMe(null);
   }
 
@@ -185,7 +204,7 @@ export default function App() {
       </div>
 
       <div className="flex gap-3 items-center">
-        <label>페이지당</label>
+        <label>페이지당 표시 글</label>
         <select
           value={String(pageSize)}
           onChange={e => setSearchParams({ page: "1", perPage: e.target.value, pages: String(displayPageNum) })}
@@ -194,17 +213,6 @@ export default function App() {
           <option value="10">10</option>
           <option value="15">15</option>
           <option value="30">30</option>
-        </select>
-
-        <label>표시 개수</label>
-        <select
-          value={String(displayPageNum)}
-          onChange={e => setSearchParams({ page: String(startPage), perPage: String(pageSize), pages: e.target.value })}
-          className="border rounded px-2 py-1"
-        >
-          <option value="5">5</option>
-          <option value="10">10</option>
-          <option value="15">15</option>
         </select>
       </div>
 
@@ -276,36 +284,29 @@ export default function App() {
             </Link>
           </li>
         ))}
-      </ul>
-      <div className="flex gap-2 justify-center items-center mt-4">
-        {/* 이전 묶음 */}
+      </ul>      
+      <div ref={pagerRef} className="flex flex-wrap gap-2 justify-center items-center mt-4">
         <button
           className="px-3 py-1 border rounded disabled:opacity-40"
-          onClick={() => setSearchParams({ page: String(Math.max(1, startPage - displayPageNum)), perPage: String(pageSize), pages: String(displayPageNum) })}
-          disabled={startPage === 1}
-        >
-          ←
-        </button>
+          onClick={() => setSearchParams({ page: String(Math.max(1, startPage - 1)), perPage: String(pageSize) })}
+          disabled={!hasPrevWindow}
+          aria-label="이전 묶음"
+        >←</button>
 
-        {/* 페이지 번호들 */}
-        {Array.from({ length: displayPageNum }, (_, i) => startPage + i).map(n => (
+        {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(n => (
           <button
             key={n}
             className={`px-3 py-1 border rounded ${n === page ? "bg-black text-white" : ""}`}
-            onClick={() => setSearchParams({ page: String(n), perPage: String(pageSize), pages: String(displayPageNum) })}
-          >
-            {n}
-          </button>
+            onClick={() => setSearchParams({ page: String(n), perPage: String(pageSize) })}
+          >{n}</button>
         ))}
 
-        {/* 다음 묶음: 다음 묶음 첫 아이템 존재할 때만 활성화 */}
         <button
           className="px-3 py-1 border rounded disabled:opacity-40"
-          onClick={() => setSearchParams({ page: String(endPage + 1), perPage: String(pageSize), pages: String(displayPageNum) })}
+          onClick={() => setSearchParams({ page: String(endPage + 1), perPage: String(pageSize) })}
           disabled={!hasNextWindow}
-        >
-          →
-        </button>
+          aria-label="다음 묶음"
+        >→</button>
       </div>
     </div>
   );
