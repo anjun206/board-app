@@ -303,6 +303,7 @@ async def delete_post(pid: str, current=Depends(get_current_user)):
         raise HTTPException(404, "not found")
     if str(doc.get("author_id")) != str(current["_id"]):
         raise HTTPException(403, "not owner")
+    await comments.delete_many({"post_id": oid})
     await posts.delete_one({"_id": oid})
 
 # --- 좋아요 추가 ---

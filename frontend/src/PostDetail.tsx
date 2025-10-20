@@ -138,7 +138,7 @@ export default function PostDetail() {
   }
 
   // 삭제 ----------------------------------
-  const reallySeqConfirm = useReallySequenceConfirm(0.4, 6, 120); // (p, max, delayMs)
+  const reallySeqConfirm = useReallySequenceConfirm(0.5, 9, 120); // (p, max, delayMs) p로 확률 조절
 
   async function removePost() {
     if (!token) return alert("로그인이 필요합니다.");
