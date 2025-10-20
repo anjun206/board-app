@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";   // React 훅 임포트
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";   // React 훅 임포트
 import { Link, useSearchParams } from "react-router-dom";
 
 /**
@@ -28,6 +28,8 @@ type Post = {
 type User = { id: string; email: string; username: string };
 type TokenResp = { access_token: string; token_type: string; user: User };
 
+type PostsPageResponse = { items: Post[]; total: number; skip: number; limit: number };
+
 export default function App() {
   // ---------------------------
   // 상태 정의(React state)
@@ -48,8 +50,6 @@ export default function App() {
 
   const authed = Boolean(token);                             // 토큰 존재 여부로 로그인판단
 
-  const [hasMore, setHasMore] = useState(false);
-
   const [searchParams, setSearchParams] = useSearchParams();
   const pageFromQS = parseInt(searchParams.get("page") ?? "1", 10);
   const page = Number.isFinite(pageFromQS) && pageFromQS > 0 ? pageFromQS : 1;
@@ -57,24 +57,37 @@ export default function App() {
   const perPageFromQS = parseInt(searchParams.get("perPage") ?? "10", 10);
   const pageSize = Number.isFinite(perPageFromQS) && perPageFromQS > 0 ? perPageFromQS : 10;
 
-  const pagesFromQS = parseInt(searchParams.get("pages") ?? "10", 10);
-  const displayPageNum = Number.isFinite(pagesFromQS) && pagesFromQS > 0 ? pagesFromQS : 10;
+  const [total, setTotal] = useState(0);
 
-  const startPage = Math.floor((page - 1) / displayPageNum) * displayPageNum + 1;
-  const endPage = startPage + displayPageNum - 1;
+  const paginationRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(10);
 
-  const [hasNextWindow, setHasNextWindow] = useState(false);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const windowSize = Math.max(1, Math.min(visibleCount, totalPages));
+  const startPage = Math.floor((page - 1) / windowSize) * windowSize + 1;
+  const endPage = Math.min(totalPages, startPage + windowSize - 1);
+  const pageNumbers = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+  const hasPrevWindow = startPage > 1;
+  const hasNextWindow = endPage < totalPages;
+
+
+
+
 
   /**
    * 글 목록 로드
    * - GET /posts 호출 → JSON으로 파싱 → posts 상태에 반영
    */
-  async function loadPosts(pg = 1, ps = pageSize) {
+  async function loadPosts(pg = page, ps = pageSize) {
     const skip = (pg - 1) * ps;
-    const res = await fetch(`${API}/posts?skip=${skip}&limit=${ps}`);
-    const data = await res.json();
-    setPosts(data);
-    setHasMore(Array.isArray(data) && data.length === ps); // 꽉 차면 다음 페이지가 있을 가능성
+    const res = await fetch(\`${API}/posts?skip=${skip}&limit=${ps}\`);
+    if (!res.ok) {
+      console.error('failed to load posts', res.status);
+      return;
+    }
+    const data: PostsPageResponse = await res.json();
+    setPosts(Array.isArray(data.items) ? data.items : []);
+    setTotal(typeof data.total === 'number' ? data.total : 0);
   }
 
   async function fetchMe(tok: string) {
@@ -85,23 +98,27 @@ export default function App() {
     else setMe(null);
   }
 
+  useLayoutEffect(() => {
+    if (!paginationRef.current) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      const buttons = Math.max(1, Math.floor((width - 64) / 48)); // 버튼/여백 값은 디자인에 맞게 조정
+      setVisibleCount(buttons);
+    });
+    ro.observe(paginationRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     loadPosts(page, pageSize);
   }, [page, pageSize]);
 
   useEffect(() => {
-    const probe = async () => {
-      const skip = endPage * pageSize; // (endPage+1)번째 페이지의 첫 아이템
-      const res = await fetch(`${API}/posts?skip=${skip}&limi=1`);
-      try {
-        const data = await res.json();
-        setHasNextWindow(Array.isArray(data) && data.length > 0);
-      } catch {
-        setHasNextWindow(false);
-      }
-    };
-    probe();
-  }, [endPage, pageSize]);
+    if (totalPages > 0 && page > totalPages) {
+      setSearchParams({ page: String(totalPages), perPage: String(pageSize) });
+    }
+  }, [page, pageSize, setSearchParams, totalPages]);
+
 
   useEffect(() => {                                          // 마운트/토큰변경 시 실행
     if (token) fetchMe(token);
@@ -121,7 +138,7 @@ export default function App() {
       body: JSON.stringify({ title, body }),
     });
     setTitle(""); setBody("");                               // 입력 초기화
-    setSearchParams({ page: "1", perPage: String(pageSize), pages: String(displayPageNum) });                          // 1페이지로 이동 (URL 쿼리 갱신)
+    setSearchParams({ page: "1", perPage: String(pageSize) });                          // 1페이지로 이동 (URL 쿼리 갱신)
     await loadPosts(1);
   }
 
@@ -185,26 +202,16 @@ export default function App() {
       </div>
 
       <div className="flex gap-3 items-center">
-        <label>페이지당</label>
+        <label>��������</label>
         <select
           value={String(pageSize)}
-          onChange={e => setSearchParams({ page: "1", perPage: e.target.value, pages: String(displayPageNum) })}
-          className="border rounded px-2 py-1"
-        >
-          <option value="10">10</option>
-          <option value="15">15</option>
-          <option value="30">30</option>
-        </select>
-
-        <label>표시 개수</label>
-        <select
-          value={String(displayPageNum)}
-          onChange={e => setSearchParams({ page: String(startPage), perPage: String(pageSize), pages: e.target.value })}
+          onChange={e => setSearchParams({ page: "1", perPage: e.target.value })}
           className="border rounded px-2 py-1"
         >
           <option value="5">5</option>
           <option value="10">10</option>
           <option value="15">15</option>
+          <option value="30">30</option>
         </select>
       </div>
 
@@ -271,40 +278,41 @@ export default function App() {
             >
               {p.title}{" "}
               <span className="text-sm text-gray-500">
-                (💬 {p.comments_count ?? 0} · 👍 {p.likes_count ?? 0})
+                (댓글 {p.comments_count ?? 0}개 · 좋아요 {p.likes_count ?? 0}개)
               </span>
             </Link>
           </li>
         ))}
       </ul>
-      <div className="flex gap-2 justify-center items-center mt-4">
+
+      <div ref={paginationRef} className="flex gap-2 justify-center items-center mt-4">
         {/* 이전 묶음 */}
         <button
           className="px-3 py-1 border rounded disabled:opacity-40"
-          onClick={() => setSearchParams({ page: String(Math.max(1, startPage - displayPageNum)), perPage: String(pageSize), pages: String(displayPageNum) })}
-          disabled={startPage === 1}
+          onClick={() => setSearchParams({ page: String(Math.max(1, startPage - windowSize)), perPage: String(pageSize) })}
+          disabled={!hasPrevWindow}
         >
-          ←
+          &lt;
         </button>
 
-        {/* 페이지 번호들 */}
-        {Array.from({ length: displayPageNum }, (_, i) => startPage + i).map(n => (
+        {/* 페이지 번호 */}
+        {pageNumbers.map(n => (
           <button
             key={n}
             className={`px-3 py-1 border rounded ${n === page ? "bg-black text-white" : ""}`}
-            onClick={() => setSearchParams({ page: String(n), perPage: String(pageSize), pages: String(displayPageNum) })}
+            onClick={() => setSearchParams({ page: String(n), perPage: String(pageSize) })}
           >
             {n}
           </button>
         ))}
 
-        {/* 다음 묶음: 다음 묶음 첫 아이템 존재할 때만 활성화 */}
+        {/* 다음 묶음 */}
         <button
           className="px-3 py-1 border rounded disabled:opacity-40"
-          onClick={() => setSearchParams({ page: String(endPage + 1), perPage: String(pageSize), pages: String(displayPageNum) })}
+          onClick={() => setSearchParams({ page: String(Math.min(totalPages, endPage + 1)), perPage: String(pageSize) })}
           disabled={!hasNextWindow}
         >
-          →
+          &gt;
         </button>
       </div>
     </div>

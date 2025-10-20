@@ -108,6 +108,16 @@ class PostOut(PostIn):
     comments_count: int = 0
     likes_count: int = 0
 
+
+class PostsPage(BaseModel):
+    """
+    �Խñ� ����Ʈ(items)�� �� ����(total)�� skip/limit ��ü�� ��ȯ.
+    """
+    items: List[PostOut]
+    total: int
+    skip: int
+    limit: int
+
 class UserCreate(BaseModel):
     email: EmailStr
     username: str = Field(min_length=1, max_length=30)
@@ -255,10 +265,16 @@ async def me(current=Depends(get_current_user)):
 # =========================
 # 게시글 API (목록/조회는 공개, 작성/수정/삭제는 로그인 필요)
 # =========================
-@app.get("/posts", response_model=List[PostOut])                   # 목록(공개)
+@app.get("/posts", response_model=PostsPage)                   # 목록(공개)
 async def list_posts(skip: int = 0, limit: int = 20):
-    cursor = posts.find().skip(skip).limit(limit).sort("_id", -1)  # 최신순
-    return [post_to_out(d) async for d in cursor]
+    if skip < 0:
+        raise HTTPException(status_code=400, detail='skip must be non-negative')
+    limit = max(1, min(limit, 100))
+
+    cursor = posts.find().sort('_id', -1).skip(skip).limit(limit)  # �ֽż�
+    items = [post_to_out(d) async for d in cursor]
+    total = await posts.count_documents({})
+    return PostsPage(items=items, total=total, skip=skip, limit=limit)
 
 @app.post("/posts", response_model=PostOut, status_code=201)       # 생성(로그인 필요)
 async def create_post(p: PostIn, current=Depends(get_current_user)):
