@@ -1,0 +1,51 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: mongo
+    ports: ["27017:27017"]
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: board
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: mongo-express
+    ports: ["8081:8081"]
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    depends_on: [mongo]
+
+  backend:
+    build: ./backend
+    container_name: backend
+    ports: ["8000:8000"]
+    volumes:
+      - ./backend:/app
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: board
+      PYTHONUNBUFFERED: "1"
+      WATCHFILES_FORCE_POLLING: "true"   # 👈 FastAPI(uvicorn --reload) 파일 감시 폴링
+    depends_on: [mongo]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports: ["5173:5173"]
+    volumes:
+      - ./frontend:/usr/src/app
+      - board_front_node_modules:/usr/src/app/node_modules
+    environment:
+      VITE_API_BASE: http://localhost:8000
+      CHOKIDAR_USEPOLLING: "1"           # 👈 Vite(Chokidar) 폴링
+      WATCHPACK_POLLING: "true"          # (보조) 일부 도구 호환용
+    command: sh -lc "npm ci || npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    depends_on: [backend]
+
+volumes:
+  mongo_data:
+  board_front_node_modules:
