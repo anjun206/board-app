@@ -190,7 +190,15 @@ export default function App() {
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       {/* 상단 바: 제목 + 사용자 정보/로그아웃 */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">게시판</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold">게시판</h1>
+          <Link
+            to="/demo/cassette"
+            className="text-sm text-blue-600 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+          >
+            Cassette 데모
+          </Link>
+        </div>
         {authed ? (
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-600">

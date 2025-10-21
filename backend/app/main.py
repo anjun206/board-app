@@ -231,6 +231,7 @@ async def signup(u: UserCreate):
         "username": u.username,
         "password_hash": hash_password(u.password),
         "created_at": datetime.now(timezone.utc),
+        "token_version": 0,
     }
     res = await users.insert_one(doc)                              # insert
     saved = await users.find_one({"_id": res.inserted_id})         # 방금 저장한 문서 로드
@@ -241,11 +242,21 @@ class LoginBody(BaseModel):                                        # JSON 로그
     password: str
 
 @app.post("/auth/login", response_model=TokenOut)                  # JSON 로그인(프론트에서 사용)
-async def login(body: LoginBody):
+async def login(body: LoginBody, response: Response):
     user = await users.find_one({"email": body.email})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="invalid email or password")
     token = create_access_token({"sub": str(user["_id"])})  # ← 여기!
+    refresh = create_refresh_token({"sub": str(user["_id"]), "ver": user.get("token_version", 0)})
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh,
+        httponly=True,
+        secure=False,
+        path="/",
+        samesite="strict",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
     return TokenOut(access_token=token, user=user_to_out(user))
 
 @app.post("/auth/token", response_model=TokenOut)                  # Swagger Authorize 전용(폼)
@@ -268,7 +279,7 @@ async def refresh_token(request: Request, response: Response):
         uid: str = payload.get("sub")
         ver: int = payload.get("ver", 0)
     except JWTError:
-        raise health(401, "invalid refresh token")
+        raise HTTPException(401, "invalid refresh token")
     
     user = await users.find_one({"_id": ObjectId(uid)})
     if not user:
@@ -279,6 +290,16 @@ async def refresh_token(request: Request, response: Response):
     
     # 필요하면 여기서 리프레시 토큰 회전(jti 새로 발급 & 쿠키 교체)
     access = create_access_token({"sub": str(user["_id"])})
+    new_refresh = create_refresh_token({"sub": str(user["_id"]), "ver": user.get("token_version", 0)})
+    response.set_cookie(
+        "refresh_token",
+        new_refresh,
+        httponly=True,
+        secure=False,
+        path="/",
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
     return TokenOut(access_token=access, user=user_to_out(user))
 
 @app.post("/auth/logout")
@@ -334,7 +355,11 @@ async def get_post(pid: str):
 @app.put("/posts/{pid}", response_model=PostOut)                   # 수정(로그인 필요)
 async def update_post(pid: str, p: PostIn, current=Depends(get_current_user)):
     oid = ObjectId(pid)
-    upd = await posts.find_one_and_update({"_id": oid}, {"$set": p.dict()}, return_document=True)
+    upd = await posts.find_one_and_update(
+        {"_id": oid, "author_id": str(current["_id"])},
+        {"$set": p.dict()},
+        return_document=True,
+        )
     if not upd:
         raise HTTPException(404, "not found")
     return post_to_out(upd)
@@ -366,12 +391,14 @@ async def like_post(pid: str, current=Depends(get_current_user)):
     post = await posts.find_one({"_id": oid}, {"_id": 1})
     if not post:
         raise HTTPException(404, "post not found")
-
-    # $addToSet: 중복 없이 추가
-    await posts.update_one({"_id": oid}, {"$addToSet": {"likes": str(current["_id"])}})
-
+    
     # 캐시 필드 likes_count를 쓰고 싶다면 함께 유지보수:
-    await posts.update_one({"_id": oid}, {"$addToSet": {"likes": str(current["_id"])}, "$inc": {"likes_count": 1}})
+    res = await posts.update_one(
+        {"_id": oid},
+        {"$addToSet": {"likes": str(current["_id"])}}
+    )
+    if res.modified_count:
+        await posts.update_one({"_id": oid}, {"$inc": {"likes_count": 1}})
 
 # 좋아요 취소
 @app.delete("/posts/{pid}/likes", status_code=204)
@@ -384,10 +411,13 @@ async def unlike_post(pid: str, current=Depends(get_current_user)):
     if not post:
         raise HTTPException(404, "post not found")
 
-    await posts.update_one({"_id": oid}, {"$pull": {"likes": str(current["_id"])}})
-
     # likes_count 캐시를 쓰는 경우:
-    await posts.update_one({"_id": oid}, {"$pull": {"likes": str(current["_id"])}, "$inc": {"likes_count": -1}})
+    res = await posts.update_one(
+        {"_id": oid},
+        {"$pull": {"likes": str(current["_id"])}}
+    )
+    if res.modified_count:
+        await posts.update_one({"_id": oid}, {"$inc": {"likes_count": -1}})
 
 # 현재 내가 좋아요 눌렀는지 여부
 @app.get("/posts/{pid}/liked")
