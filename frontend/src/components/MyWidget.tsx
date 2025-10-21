@@ -1,16 +1,34 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
-type TagKey = "log" | "maint" | "notice";
+export type TagKey = "log" | "maint" | "notice";
 type FilterKey = "all" | TagKey;
 
 type Post = {
   id: string;
   title: string;
-  body: string;
+//   body: string;
   author: string;
   likes: number;
+  comments?: number;
   tag: TagKey;
 };
+
+type ExternalPost = {
+  id: string;
+  title: string;
+  body: string;
+  author?: string | null;
+  likes?: number | null;
+  comments?: number | null;
+  tag?: TagKey | null;
+};
+
+interface MyWidgetProps {
+  posts?: ExternalPost[];
+  readOnly?: boolean;
+  onLike?: (id: string) => void;
+  onSelectPost?: (id: string) => void;
+}
 
 const FILTER_OPTIONS = [
   { key: "all", label: "All" },
@@ -23,39 +41,75 @@ const SEED_POSTS: Post[] = [
   {
     id: "PX-2309",
     title: "[항해로그] 오리온 회랑 초공간 도약 성공",
-    body:
-      "연료 소모율 0.92. 점프 후 센서에 미세한 노이즈. 캐패시터 재보정 필요. 승무원 사기 양호.",
+    // body:
+    //   "연료 소모율 0.92. 점프 후 센서에 미세한 노이즈. 캐패시터 재보정 필요. 승무원 사기 양호.",
     author: "NAV-OPS",
     likes: 17,
+    comments: 4,
     tag: "log",
   },
   {
     id: "PX-2310",
     title: "[정비] 카세트 데크 모듈 – 캡스턴 교체",
-    body:
-      "재생 중 wow&flutter 증가. 캡스턴 마모로 확인. 베어링 윤활 후 안정화. 예비 부품 주문.",
+    // body:
+    //   "재생 중 wow&flutter 증가. 캡스턴 마모로 확인. 베어링 윤활 후 안정화. 예비 부품 주문.",
     author: "ENG-ROOM",
     likes: 9,
+    comments: 2,
     tag: "maint",
   },
   {
     id: "PX-2312",
     title: "[공지] 보드 스킨 업데이트(베이지)",
-    body:
-      "포인터 컬러는 블랙/옐로우 포인트 유지, 기본 포인트는 따뜻한 베이지로 일괄 조정.",
+    // body:
+    //   "포인터 컬러는 블랙/옐로우 포인트 유지, 기본 포인트는 따뜻한 베이지로 일괄 조정.",
     author: "SYS-ADM",
     likes: 5,
+    comments: 1,
     tag: "notice",
   },
 ];
+
+function normalizePost(input: ExternalPost): Post {
+  const authorSource = input.author ?? "USER";
+  const author =
+    typeof authorSource === "string" && authorSource.trim().length > 0
+      ? authorSource.trim()
+      : "USER";
+  const likes =
+    typeof input.likes === "number" && Number.isFinite(input.likes)
+      ? input.likes
+      : 0;
+  const comments =
+    typeof input.comments === "number" && Number.isFinite(input.comments)
+      ? input.comments
+      : 0;
+
+  return {
+    id: input.id,
+    title: input.title,
+    // body: input.body,
+    author,
+    likes,
+    comments,
+    tag: input.tag ?? "log",
+  };
+}
 
 // Tailwind 클래스 문자열을 가볍게 합성하는 헬퍼입니다.
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 // 메인 데모 컴포넌트: 분리된 UI 조각을 조합하고 더미 데이터를 관리합니다.
-export default function MyWidget() {
-  const [posts, setPosts] = useState<Post[]>(SEED_POSTS);
+export default function MyWidget({
+  posts: externalPosts,
+  readOnly = false,
+  onLike,
+  onSelectPost,
+}: MyWidgetProps = {}) {
+  const [posts, setPosts] = useState<Post[]>(() =>
+    externalPosts ? externalPosts.map(normalizePost) : SEED_POSTS
+  );
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [author, setAuthor] = useState("USER-01");
@@ -66,14 +120,20 @@ export default function MyWidget() {
     const scoped =
       filter === "all" ? posts : posts.filter((p) => p.tag === filter);
     return scoped.filter((p) =>
-      (p.title + p.body + p.author)
+      (p.title + p.author)
         .toLowerCase()
         .includes(query.toLowerCase())
     );
   }, [posts, filter, query]);
 
+  useEffect(() => {
+    if (!externalPosts) return;
+    setPosts(externalPosts.map(normalizePost));
+  }, [externalPosts]);
+
   const handleCreate: React.FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault();
+    if (readOnly) return;
     if (!title.trim() || !body.trim()) return;
 
     setPosts((prev) => [
@@ -83,6 +143,7 @@ export default function MyWidget() {
         body: body.trim(),
         author: author.trim() || "USER",
         likes: 0,
+        comments: 0,
         tag: "log",
       },
       ...prev,
@@ -92,6 +153,9 @@ export default function MyWidget() {
   };
 
   function handleLike(id: string) {
+    if (onLike) {
+      onLike(id);
+    }
     setPosts((prev) =>
       prev.map((p) => (p.id === id ? { ...p, likes: p.likes + 1 } : p))
     );
@@ -106,23 +170,25 @@ export default function MyWidget() {
         onQueryChange={setQuery}
       />
 
-      <ComposerSection
-        title={title}
-        body={body}
-        author={author}
-        onTitleChange={setTitle}
-        onBodyChange={setBody}
-        onAuthorChange={setAuthor}
-        onSubmit={handleCreate}
-      />
+      {!readOnly && (
+        <ComposerSection
+          title={title}
+          body={body}
+          author={author}
+          onTitleChange={setTitle}
+          onBodyChange={setBody}
+          onAuthorChange={setAuthor}
+          onSubmit={handleCreate}
+        />
+      )}
 
-      <PostsSection posts={filtered} onLike={handleLike} />
+      <PostsSection posts={filtered} onLike={handleLike} onSelect={onSelectPost} />
       <CassetteFooter />
     </CassetteLayout>
   );
 }
 // 화면 전체 배경과 공용 스타일을 감싸는 레이아웃 래퍼입니다.
-function CassetteLayout({ children }: { children: React.ReactNode }) {
+export function CassetteLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[#0e1214] text-[#E6DFD3] antialiased">
       <div className="pointer-events-none fixed inset-0 opacity-[0.06]" aria-hidden>
@@ -141,7 +207,7 @@ interface CassetteHeaderProps {
   onQueryChange: (value: string) => void;
 }
 // 상단 카세트 헤더: LED 마퀴, 필터 UI, 릴 패널을 묶습니다.
-function CassetteHeader({
+export function CassetteHeader({
   filter,
   onFilterChange,
   query,
@@ -270,7 +336,7 @@ interface ComposerSectionProps {
   onSubmit: React.FormEventHandler<HTMLFormElement>;
 }
 // 글 작성 폼과 콘셉트 설명 카드를 포함한 섹션입니다.
-function ComposerSection({
+export function ComposerSection({
   title,
   body,
   author,
@@ -339,10 +405,11 @@ function ComposerSection({
 
 interface PostsSectionProps {
   posts: Post[];
-  onLike: (id: string) => void;
+  onLike?: (id: string) => void;
+  onSelect?: (id: string) => void;
 }
 // 게시글 목록 컨테이너로, 개별 포스트 카드를 렌더링합니다.
-function PostsSection({ posts, onLike }: PostsSectionProps) {
+export function PostsSection({ posts, onLike, onSelect }: PostsSectionProps) {
   return (
     <section className="mt-8">
       <div className="mb-3 flex items-center justify-between">
@@ -352,19 +419,22 @@ function PostsSection({ posts, onLike }: PostsSectionProps) {
 
       <div className="grid gap-4">
         {posts.map((post) => (
-          <PostCard key={post.id} post={post} onLike={onLike} />
+          <PostCard key={post.id} post={post} onLike={onLike} onSelect={onSelect} />
         ))}
       </div>
     </section>
   );
 }
 
+
 interface PostCardProps {
   post: Post;
-  onLike: (id: string) => void;
+  onLike?: (id: string) => void;
+  onSelect?: (id: string) => void;
 }
 // 한 개의 게시글을 카세트 카트리지 스타일로 보여줍니다.
-function PostCard({ post, onLike }: PostCardProps) {
+function PostCard({ post, onLike, onSelect }: PostCardProps) {
+  const handleSelect = onSelect ? () => onSelect(post.id) : undefined;
   return (
     <article className="group relative overflow-hidden rounded-2xl border border-[#2a2f35] bg-[#14191e] p-4 shadow-[0_8px_30px_rgba(0,0,0,0.35)] transition hover:border-[#E6DFD3]/40">
       <div className="mb-3 flex items-center justify-between">
@@ -376,7 +446,7 @@ function PostCard({ post, onLike }: PostCardProps) {
           className={clsx(
             "rounded px-2 py-0.5 text-[10px] uppercase tracking-wider",
             post.tag === "notice" &&
-              "bg-yellow-400 text-[#0e1214]",
+              "bg-yellow-500 text-[#0e1214]",
             post.tag === "maint" &&
               "bg-[#E6DFD3]/20 text-[#E6DFD3] border border-[#E6DFD3]/40",
             post.tag === "log" &&
@@ -387,21 +457,52 @@ function PostCard({ post, onLike }: PostCardProps) {
         </span>
       </div>
 
-      <h3 className="text-lg font-semibold text-[#F3EBDD]">{post.title}</h3>
-      <p className="mt-1 text-sm text-[#DAD3C6]">{post.body}</p>
+      {/* <h3 className="text-lg font-semibold text-[#F3EBDD]"> */}
+        {handleSelect ? (
+          <button
+            type="button"
+            onClick={handleSelect}
+            className="
+                group
+                w-full flex items-center gap-3
+                rounded-md px-4 py-2
+                text-[#F3EBDD] 
+                bg-transparent hover:bg-zinc-800/70
+                hover:text-yellow-500
+                border border-transparent hover:border-zinc-600
+                cursor-pointer
+                transition
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-300/70
+            "
+          >
+        <h3 className="text-lg font-semibold flex-1 text-left">
+            {post.title}
+        </h3>
+          </button>
+        ) : (
+          post.title
+        )}
+      {/* </h3> */}
+      {/* <p className="mt-1 text-sm text-[#DAD3C6]">{post.body}</p> */}
 
       <div className="mt-3 flex items-center justify-between text-xs text-[#B9B1A3]">
         <span>by {post.author}</span>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => onLike(post.id)}
-            className="rounded-md border border-[#3a3f45] bg-[#10151a] px-2 py-1 text-[#E6DFD3] transition hover:border-[#E6DFD3]/50"
-          >
-            👍 {post.likes}
-          </button>
-          <button className="rounded-md border border-[#3a3f45] bg-[#10151a] px-2 py-1 transition hover:border-yellow-400/60 hover:text-yellow-400">
-            💬 댓글
-          </button>
+          {onLike ? (
+            <button
+              onClick={() => onLike(post.id)}
+              className="rounded-md border border-[#3a3f45] bg-[#10151a] px-2 py-1 text-[#E6DFD3] transition hover:border-[#E6DFD3]/50"
+            >
+              Likes {post.likes}
+            </button>
+          ) : (
+            <span className="rounded-md border border-[#3a3f45] bg-[#10151a] px-2 py-1 text-[#E6DFD3]">
+              Likes {post.likes}
+            </span>
+          )}
+          <span className="rounded-md border border-[#3a3f45] bg-[#10151a] px-2 py-1 text-[#E6DFD3]">
+            Comments {post.comments ?? 0}
+          </span>
         </div>
       </div>
 
@@ -409,11 +510,14 @@ function PostCard({ post, onLike }: PostCardProps) {
     </article>
   );
 }
+
+export { PostsSection as CassettePostsSection };
+export type { Post as CassettePost };
 // 페이지 하단 저작권 영역입니다.
-function CassetteFooter() {
+export function CassetteFooter() {
   return (
     <footer className="mt-12 pb-8 text-center text-[11px] text-[#7f878f]">
-      <p>© 2025 Cassette Futurism Board — Beige Concept</p>
+      <p>(c) 2025 Cassette Futurism Board - Beige Concept</p>
     </footer>
   );
 }
@@ -447,7 +551,7 @@ function Marquee({ children }: { children: React.ReactNode }) {
   );
 }
 // 카세트 릴을 SVG로 표현한 회전 애니메이션입니다.
-function Reel({ reverse = false }: { reverse?: boolean }) {
+export function Reel({ reverse = false }: { reverse?: boolean }) {
   return (
     <div className="relative mx-auto aspect-square w-36 rounded-full border border-[#2e343a] bg-[#0f1419] p-3 shadow-inner">
       <svg viewBox="0 0 100 100" className={clsx("reel-spin", reverse && "reverse")}>

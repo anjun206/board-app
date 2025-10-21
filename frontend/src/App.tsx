@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";   // React 훅 임포트
-import { Link, useSearchParams } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";   // React import
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 // lib/api 래퍼/도우미 사용
 import {
@@ -13,6 +13,16 @@ import {
   setToken as saveToken,   // ← 저장용(로컬스토리지) 별칭
   countPosts
 } from "./lib/api";
+import {
+  CassetteHeader,
+  ComposerSection,
+  PostsSection,
+  CassetteFooter,
+  CassetteLayout,
+  CassettePostsSection,
+  type CassettePost,
+  type TagKey 
+} from "./components";
 
 import {
   useElementWidth
@@ -62,6 +72,7 @@ export default function App() {
 
   // 페이지/페이지당
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const pageFromQS = parseInt(searchParams.get("page") ?? "1", 10);
   const page = Number.isFinite(pageFromQS) && pageFromQS > 0 ? pageFromQS : 1;
@@ -97,6 +108,36 @@ export default function App() {
 
   const hasPrevWindow = startPage > 1;
   const hasNextWindow = endPage < lastPage;
+
+  const deriveCassetteTag = useCallback(
+    (item: Post): TagKey => {
+      if ((item.likes_count ?? 0) > 20) return "notice";
+      if ((item.comments_count ?? 0) > 3) return "maint";
+      return "log";
+    },
+    []
+  );
+
+  const cassettePosts = useMemo<CassettePost[]>(
+    () =>
+      posts.map((post): CassettePost => ({
+        id: post.id,
+        title: post.title,
+        // body: post.body,
+        author: post.author_username ?? post.author_id ?? "Unknown",
+        likes: post.likes_count ?? 0,
+        comments: post.comments_count ?? 0,
+        tag: deriveCassetteTag(post),
+      })),
+    [posts, deriveCassetteTag]
+  );
+
+  const handleSelectPost = useCallback(
+    (id: string) => {
+      navigate(`/posts/${id}`);
+    },
+    [navigate]
+  );
 
   /**
    * 글 목록 로드
@@ -187,135 +228,126 @@ export default function App() {
   // 렌더링(UI)
   // ---------------------------
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-6">
-      {/* 상단 바: 제목 + 사용자 정보/로그아웃 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">게시판</h1>
-          <Link
-            to="/demo/cassette"
-            className="text-sm text-blue-600 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
-          >
-            Cassette 데모
-          </Link>
-        </div>
-        {authed ? (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-600">
-              {me?.username} ({me?.email})
-            </span>
-            <button onClick={logout} className="px-3 py-1 border rounded">
-              로그아웃
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="flex gap-3 items-center">
-        <label>페이지당 표시 글</label>
-        <select
-          value={String(pageSize)}
-          onChange={e => setSearchParams({ page: "1", perPage: e.target.value, pages: String(displayPageNum) })}
-          className="border rounded px-2 py-1"
-        >
-          <option value="10">10</option>
-          <option value="15">15</option>
-          <option value="30">30</option>
-        </select>
-      </div>
-
-      {/* 인증 영역(비로그인 시에만 노출) */}
-      {!authed && (
-        <div className="border rounded p-4 space-y-3">
-          {/* 탭 전환 버튼 */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setMode("login")}
-              className={`px-3 py-1 border rounded ${mode==="login" ? "bg-black text-white" : ""}`}
-            >로그인</button>
-            <button
-              onClick={() => setMode("signup")}
-              className={`px-3 py-1 border rounded ${mode==="signup" ? "bg-black text-white" : ""}`}
-            >회원가입</button>
-          </div>
-
-          {/* 로그인 폼 */}
-          {mode === "login" ? (
-            <form onSubmit={handleLogin} className="space-y-2">
-              <input className="w-full border rounded p-2" placeholder="이메일"
-                     value={email} onChange={e=>setEmail(e.target.value)} />
-              <input className="w-full border rounded p-2" placeholder="비밀번호" type="password"
-                     value={password} onChange={e=>setPassword(e.target.value)} />
-              <button className="px-4 py-2 rounded bg-black text-white">로그인</button>
-            </form>
-          ) : (
-          /* 회원가입 폼 */
-            <form onSubmit={handleSignup} className="space-y-2">
-              <input className="w-full border rounded p-2" placeholder="이메일"
-                     value={email} onChange={e=>setEmail(e.target.value)} />
-              <input className="w-full border rounded p-2" placeholder="아이디"
-                     value={username} onChange={e=>setUsername(e.target.value)} />
-              <input className="w-full border rounded p-2" placeholder="비밀번호" type="password"
-                     value={password} onChange={e=>setPassword(e.target.value)} />
-              <button className="px-4 py-2 rounded bg-black text-white">회원가입</button>
-            </form>
-          )}
-        </div>
-      )}
-
-      {/* 글 작성 폼(로그인해야 활성화) */}
-      <form onSubmit={create} className="space-y-3">
-        <input className="w-full border rounded p-2"
-               value={title} onChange={e=>setTitle(e.target.value)}
-               placeholder={authed ? "제목" : "로그인 후 작성 가능"} disabled={!authed} />
-        <textarea className="w-full border rounded p-2"
-                  value={body} onChange={e=>setBody(e.target.value)}
-                  placeholder={authed ? "내용" : "로그인 후 작성 가능"} disabled={!authed} />
-        <button disabled={!authed}
-                className="px-4 py-2 rounded bg-black text-white disabled:opacity-40">
-          등록
-        </button>
-      </form>
-
-      {/* 글 목록 */}
-      <ul className="space-y-3">
-        {posts.map(p => (
-          <li key={p.id} className="border rounded p-3">
+    <CassetteLayout>
+      <div className="max-w-3xl mx-auto p-6 space-y-6">
+        {/* 상단 바: 제목 + 사용자 정보/로그아웃 */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">게시판</h1>
             <Link
-              to={`/posts/${p.id}`}
-              className="font-semibold hover:underline"
+              to="/demo/cassette"
+              className="text-sm text-blue-600 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
             >
-              {p.title}{" "}
-              <span className="text-sm text-gray-500">
-                (💬 {p.comments_count ?? 0} · 👍 {p.likes_count ?? 0})
-              </span>
+              Cassette 데모
             </Link>
-          </li>
-        ))}
-      </ul>      
-      <div ref={pagerRef} className="flex flex-wrap gap-2 justify-center items-center mt-4">
-        <button
-          className="px-3 py-1 border rounded disabled:opacity-40"
-          onClick={() => setSearchParams({ page: String(Math.max(1, startPage - 1)), perPage: String(pageSize) })}
-          disabled={!hasPrevWindow}
-          aria-label="이전 묶음"
-        >←</button>
+          </div>
+          {authed ? (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">
+                {me?.username} ({me?.email})
+              </span>
+              <button onClick={logout} className="px-3 py-1 border rounded">
+                로그아웃
+              </button>
+            </div>
+          ) : null}
+        </div>
 
-        {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(n => (
+        <div className="flex gap-3 items-center">
+          <label>페이지당 표시 글</label>
+          <select
+            value={String(pageSize)}
+            onChange={e => setSearchParams({ page: "1", perPage: e.target.value, pages: String(displayPageNum) })}
+            className="border rounded px-2 py-1"
+          >
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="30">30</option>
+          </select>
+        </div>
+
+        {/* 인증 영역(비로그인 시에만 노출) */}
+        {!authed && (
+          <div className="border rounded p-4 space-y-3">
+            {/* 탭 전환 버튼 */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setMode("login")}
+                className={`px-3 py-1 border rounded ${mode==="login" ? "bg-black text-white" : ""}`}
+              >로그인</button>
+              <button
+                onClick={() => setMode("signup")}
+                className={`px-3 py-1 border rounded ${mode==="signup" ? "bg-black text-white" : ""}`}
+              >회원가입</button>
+            </div>
+
+            {/* 로그인 폼 */}
+            {mode === "login" ? (
+              <form onSubmit={handleLogin} className="space-y-2">
+                <input className="w-full border rounded p-2" placeholder="이메일"
+                      value={email} onChange={e=>setEmail(e.target.value)} />
+                <input className="w-full border rounded p-2" placeholder="비밀번호" type="password"
+                      value={password} onChange={e=>setPassword(e.target.value)} />
+                <button className="px-4 py-2 rounded bg-black text-white">로그인</button>
+              </form>
+            ) : (
+            /* 회원가입 폼 */
+              <form onSubmit={handleSignup} className="space-y-2">
+                <input className="w-full border rounded p-2" placeholder="이메일"
+                      value={email} onChange={e=>setEmail(e.target.value)} />
+                <input className="w-full border rounded p-2" placeholder="아이디"
+                      value={username} onChange={e=>setUsername(e.target.value)} />
+                <input className="w-full border rounded p-2" placeholder="비밀번호" type="password"
+                      value={password} onChange={e=>setPassword(e.target.value)} />
+                <button className="px-4 py-2 rounded bg-black text-white">회원가입</button>
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* 글 작성 폼(로그인해야 활성화) */}
+        <form onSubmit={create} className="space-y-3">
+          <input className="w-full border rounded p-2"
+                value={title} onChange={e=>setTitle(e.target.value)}
+                placeholder={authed ? "제목" : "로그인 후 작성 가능"} disabled={!authed} />
+          <textarea className="w-full border rounded p-2"
+                    value={body} onChange={e=>setBody(e.target.value)}
+                    placeholder={authed ? "내용" : "로그인 후 작성 가능"} disabled={!authed} />
+          <button disabled={!authed}
+                  className="px-4 py-2 rounded bg-black text-white disabled:opacity-40">
+            등록
+          </button>
+        </form>
+
+        {/* Post list (cassette style) */}
+        <CassettePostsSection
+          posts={cassettePosts}
+          onSelect={handleSelectPost}
+        />
+        <div ref={pagerRef} className="flex flex-wrap gap-2 justify-center items-center mt-4">
           <button
-            key={n}
-            className={`px-3 py-1 border rounded ${n === page ? "bg-black text-white" : ""}`}
-            onClick={() => setSearchParams({ page: String(n), perPage: String(pageSize) })}
-          >{n}</button>
-        ))}
+            className="px-3 py-1 border rounded disabled:opacity-40"
+            onClick={() => setSearchParams({ page: String(Math.max(1, startPage - 1)), perPage: String(pageSize) })}
+            disabled={!hasPrevWindow}
+            aria-label="이전 묶음"
+          >←</button>
 
-        <button
-          className="px-3 py-1 border rounded disabled:opacity-40"
-          onClick={() => setSearchParams({ page: String(endPage + 1), perPage: String(pageSize) })}
-          disabled={!hasNextWindow}
-          aria-label="다음 묶음"
-        >→</button>
+          {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(n => (
+            <button
+              key={n}
+              className={`px-3 py-1 border rounded ${n === page ? "bg-black text-white" : ""}`}
+              onClick={() => setSearchParams({ page: String(n), perPage: String(pageSize) })}
+            >{n}</button>
+          ))}
+
+          <button
+            className="px-3 py-1 border rounded disabled:opacity-40"
+            onClick={() => setSearchParams({ page: String(endPage + 1), perPage: String(pageSize) })}
+            disabled={!hasNextWindow}
+            aria-label="다음 묶음"
+          >→</button>
+        </div>
       </div>
-    </div>
+    </CassetteLayout>
   );
 }
