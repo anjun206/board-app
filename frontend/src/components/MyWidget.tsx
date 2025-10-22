@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useRef, useMemo, useState } from "react";
+import neodgmTTF from "../../public/fonts/neodgm.ttf"
+import neodgmCodeTTF from "../../public/fonts/neodgm_code.ttf"
 
 export type TagKey = "log" | "maint" | "notice";
 type FilterKey = "all" | TagKey;
@@ -36,6 +38,12 @@ const FILTER_OPTIONS = [
   { key: "maint", label: "Maintenance" },
   { key: "notice", label: "Notice" },
 ] as const;
+
+const FONT_STACKS = {
+  neo: '"NeoDunggeunmo", ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
+  code: '"NeoDunggeunmoCode", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+};
+
 
 const SEED_POSTS: Post[] = [
   {
@@ -190,7 +198,12 @@ export default function MyWidget({
 // 화면 전체 배경과 공용 스타일을 감싸는 레이아웃 래퍼입니다.
 export function CassetteLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#0e1214] text-[#E6DFD3] antialiased">
+    <div
+      className="min-h-screen bg-[#0e1214] text-[#E6DFD3] antialiased"
+      style={{ fontFamily: FONT_STACKS.neo }}
+    >
+      <NeoFontStyles />
+
       <div className="pointer-events-none fixed inset-0 opacity-[0.06]" aria-hidden>
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,#ffffff_1px,transparent_1px)] bg-[length:28px_28px]" />
       </div>
@@ -236,18 +249,18 @@ export function CassetteHeader({
               <div className="absolute inset-0 opacity-25 mix-blend-screen bg-[radial-gradient(circle_at_50%_-30%,#FFEFD0,transparent_60%)]" />
               <Marquee>
                 <span className="mx-8">
-                  WELCOME ABOARD - CASSETTE FUTURISM BOARD
+                  웰컴 어보드 - 카세트 퓨처리즘 게시판
                 </span>
                 <span className="mx-8">
-                  BEIGE ACCENT - ANALOG DREAMS - RETRO SPACE OPERA
+                  아-날로그 물성 - 레트로 스페이스 오페라
                 </span>
                 <span className="mx-8">
-                  로그인 없이 미리보기 • 글쓰기 가능(로컬)
+                  로그인 없이 미리보기 • 글 확인 가능
                 </span>
               </Marquee>
             </div>
             <p className="mt-2 text-[10px] text-[#B9B1A3]">
-              ※ LED 스타일 텍스트 – 소프트 네온 글로우
+              ※ LED 스타일 텍스트 - 소프트 네온 글로우
             </p>
           </div>
 
@@ -320,7 +333,7 @@ function CassettePanel() {
         <span>REEL B</span>
       </div>
       <div className="mt-3 rounded-md bg-[#E6DFD3] p-2 text-center text-xs font-semibold text-[#0e1214]">
-        CASSETTE LABEL: BEIGE / TYPE-II CHROME
+        카세트 라벨: 베이-지 / 타입-II 크롬
       </div>
     </div>
   );
@@ -440,7 +453,10 @@ function PostCard({ post, onLike, onSelect }: PostCardProps) {
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2 text-[10px] text-[#B9B1A3]">
           <Screw small />
-          <span className="uppercase tracking-[0.3em]">{post.id}</span>
+          <span
+            className="uppercase tracking-[0.3em]"
+            style={{ fontFamily: FONT_STACKS.code }}
+          >{post.id}</span>
         </div>
         <span
           className={clsx(
@@ -486,7 +502,7 @@ function PostCard({ post, onLike, onSelect }: PostCardProps) {
       {/* <p className="mt-1 text-sm text-[#DAD3C6]">{post.body}</p> */}
 
       <div className="mt-3 flex items-center justify-between text-xs text-[#B9B1A3]">
-        <span>by {post.author}</span>
+        <span>작성자 {post.author}</span>
         <div className="flex items-center gap-2">
           {onLike ? (
             <button
@@ -522,31 +538,107 @@ export function CassetteFooter() {
   );
 }
 // 마퀴/릴 애니메이션에 필요한 국소 스타일을 주입합니다.
+// function GlobalCassetteStyles() {
+//   return (
+//     <style>{`
+//       .marquee {
+//         display: inline-block;
+//         padding-left: 100%;
+//         white-space: nowrap;
+//         animation: marquee 18s linear infinite;
+//         text-shadow: 0 0 6px rgba(255, 239, 208, 0.55), 0 0 18px rgba(255, 221, 156, 0.35);
+//         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+//         letter-spacing: 0.08em;
+//       }
+//       @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+//       .reel-spin { animation: reel 9s linear infinite; transform-origin: 50% 50%; }
+//       .reel-spin.reverse { animation-direction: reverse; }
+//       @keyframes reel { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+//     `}</style>
+//   );
+// }
+
+function NeoFontStyles() {
+  return (
+    <style>{`
+      @font-face {
+        font-family: "NeoDunggeunmo";
+        src: url(${neodgmTTF}) format("truetype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "NeoDunggeunmoCode";
+        src: url(${neodgmCodeTTF}) format("truetype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+    `}</style>
+  );
+}
+
 function GlobalCassetteStyles() {
   return (
     <style>{`
-      .marquee {
+      .marquee-seamless {
         display: inline-block;
-        padding-left: 100%;
+        padding-left: 2rem;
+        padding-right: 2rem;
         white-space: nowrap;
-        animation: marquee 18s linear infinite;
-        text-shadow: 0 0 6px rgba(255, 239, 208, 0.55), 0 0 18px rgba(255, 221, 156, 0.35);
+        animation: marquee-seamless 20s linear infinite;
+        text-shadow: 
+          0 0 8px rgba(255, 140, 0, 0.9),
+          0 0 15px rgba(255, 140, 0, 0.6),
+          0 0 25px rgba(255, 100, 0, 0.4);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        letter-spacing: 0.08em;
       }
-      @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+      @keyframes marquee-seamless { 
+        0% { transform: translateX(0); } 
+        100% { transform: translateX(-100%); } 
+      }
       .reel-spin { animation: reel 9s linear infinite; transform-origin: 50% 50%; }
       .reel-spin.reverse { animation-direction: reverse; }
       @keyframes reel { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
     `}</style>
   );
 }
+
 // 텍스트를 가로로 흘려보내는 LED 마퀴 요소입니다.
 function Marquee({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative h-10 overflow-hidden bg-[#0b0f13]">
-      <div className="absolute inset-0 bg-[linear-gradient(#0b0f13_60%,rgba(255,255,255,0.03)_61%,#0b0f13_62%)] opacity-40" />
-      <div className="marquee text-[12px] leading-10 text-[#FFEFD0]">{children}</div>
+    <div className="relative h-16 overflow-hidden bg-[#1a1a1a] border-y-2 border-[#2a2a2a]">
+      {/* LED 도트 패턴 배경 */}
+      <div 
+        className="absolute inset-0 opacity-30"
+        style={{
+          backgroundImage: 'radial-gradient(circle, #333 1px, transparent 1px)',
+          backgroundSize: '4px 4px'
+        }}
+      />
+      
+      {/* 스캔라인 */}
+      <div className="
+      absolute inset-0
+      bg-[repeating-linear-gradient(0deg,transparent,transparent_1px,rgba(0,0,0,0.4)_1px,rgba(0,0,0,0.4)_2px)]
+      " />
+      
+      {/* 끊김없는 마퀴 */}
+      <div className="flex leading-[4rem]">
+        <div
+          className="marquee-seamless text-[21px] font-bold tracking-[0.15em] text-yellow-200"
+          style={{ fontFamily: FONT_STACKS.code }}
+        >
+          {children}
+        </div>
+        <div
+          className="marquee-seamless text-[21px] font-bold tracking-[0.15em] text-yellow-200"
+          style={{ fontFamily: FONT_STACKS.code }}
+        >
+          {children}
+        </div>
+      </div>
     </div>
   );
 }
@@ -597,6 +689,8 @@ export function Reel({ reverse = false }: { reverse?: boolean }) {
     </div>
   );
 }
+
+
 // 판넬 곳곳에 쓰이는 나사 머리 장식입니다.
 function Screw({ small = false }: { small?: boolean }) {
   return (

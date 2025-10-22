@@ -109,6 +109,10 @@ export default function App() {
   const hasPrevWindow = startPage > 1;
   const hasNextWindow = endPage < lastPage;
 
+  const [filter, setFilter] = useState<"all" | TagKey>("all");
+  const [query, setQuery] = useState("");
+
+
   const deriveCassetteTag = useCallback(
     (item: Post): TagKey => {
       if ((item.likes_count ?? 0) > 20) return "notice";
@@ -228,126 +232,231 @@ export default function App() {
   // 렌더링(UI)
   // ---------------------------
   return (
-    <CassetteLayout>
-      <div className="max-w-3xl mx-auto p-6 space-y-6">
-        {/* 상단 바: 제목 + 사용자 정보/로그아웃 */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold">게시판</h1>
-            <Link
-              to="/demo/cassette"
-              className="text-sm text-blue-600 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
-            >
-              Cassette 데모
-            </Link>
-          </div>
-          {authed ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600">
-                {me?.username} ({me?.email})
-              </span>
-              <button onClick={logout} className="px-3 py-1 border rounded">
-                로그아웃
-              </button>
+    <>
+      <style>{`
+        @keyframes flicker {
+          0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
+            opacity: 1;
+            text-shadow: 0 0 10px #ff0;
+          }
+          20%, 24%, 55% {
+            opacity: 0.4;
+            text-shadow: none;
+          }
+        }
+      `}</style>
+      <CassetteLayout>
+        
+        <div className="max-w-6xl mx-auto p-6 space-y-6">
+          {/* 상단 바: 제목 + 사용자 정보/로그아웃 */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <h1 className="text-2xl text-yellow-600 animate-[flicker_2s_infinite]">new!</h1>
+              <h1 className="text-2xl">  네-오 채신 게시판</h1>
+              <Link
+                to="/demo/cassette"
+                className="text-sm text-blue-600 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+              >
+                Cassette 데모
+              </Link>
             </div>
-          ) : null}
-        </div>
-
-        <div className="flex gap-3 items-center">
-          <label>페이지당 표시 글</label>
-          <select
-            value={String(pageSize)}
-            onChange={e => setSearchParams({ page: "1", perPage: e.target.value, pages: String(displayPageNum) })}
-            className="border rounded px-2 py-1"
-          >
-            <option value="10">10</option>
-            <option value="15">15</option>
-            <option value="30">30</option>
-          </select>
-        </div>
-
-        {/* 인증 영역(비로그인 시에만 노출) */}
-        {!authed && (
-          <div className="border rounded p-4 space-y-3">
-            {/* 탭 전환 버튼 */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setMode("login")}
-                className={`px-3 py-1 border rounded ${mode==="login" ? "bg-black text-white" : ""}`}
-              >로그인</button>
-              <button
-                onClick={() => setMode("signup")}
-                className={`px-3 py-1 border rounded ${mode==="signup" ? "bg-black text-white" : ""}`}
-              >회원가입</button>
-            </div>
-
-            {/* 로그인 폼 */}
-            {mode === "login" ? (
-              <form onSubmit={handleLogin} className="space-y-2">
-                <input className="w-full border rounded p-2" placeholder="이메일"
-                      value={email} onChange={e=>setEmail(e.target.value)} />
-                <input className="w-full border rounded p-2" placeholder="비밀번호" type="password"
-                      value={password} onChange={e=>setPassword(e.target.value)} />
-                <button className="px-4 py-2 rounded bg-black text-white">로그인</button>
-              </form>
-            ) : (
-            /* 회원가입 폼 */
-              <form onSubmit={handleSignup} className="space-y-2">
-                <input className="w-full border rounded p-2" placeholder="이메일"
-                      value={email} onChange={e=>setEmail(e.target.value)} />
-                <input className="w-full border rounded p-2" placeholder="아이디"
-                      value={username} onChange={e=>setUsername(e.target.value)} />
-                <input className="w-full border rounded p-2" placeholder="비밀번호" type="password"
-                      value={password} onChange={e=>setPassword(e.target.value)} />
-                <button className="px-4 py-2 rounded bg-black text-white">회원가입</button>
-              </form>
-            )}
+            {authed ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-600">
+                  {me?.username} ({me?.email})
+                </span>
+                <button onClick={logout} className="px-3 py-1 border rounded">
+                  로그아웃
+                </button>
+              </div>
+            ) : null}
           </div>
-        )}
 
-        {/* 글 작성 폼(로그인해야 활성화) */}
-        <form onSubmit={create} className="space-y-3">
-          <input className="w-full border rounded p-2"
-                value={title} onChange={e=>setTitle(e.target.value)}
-                placeholder={authed ? "제목" : "로그인 후 작성 가능"} disabled={!authed} />
-          <textarea className="w-full border rounded p-2"
-                    value={body} onChange={e=>setBody(e.target.value)}
-                    placeholder={authed ? "내용" : "로그인 후 작성 가능"} disabled={!authed} />
-          <button disabled={!authed}
-                  className="px-4 py-2 rounded bg-black text-white disabled:opacity-40">
-            등록
-          </button>
-        </form>
-
-        {/* Post list (cassette style) */}
-        <CassettePostsSection
-          posts={cassettePosts}
-          onSelect={handleSelectPost}
+        <CassetteHeader
+          filter={filter}
+          onFilterChange={setFilter}
+          query={query}
+          onQueryChange={setQuery}
         />
-        <div ref={pagerRef} className="flex flex-wrap gap-2 justify-center items-center mt-4">
-          <button
-            className="px-3 py-1 border rounded disabled:opacity-40"
-            onClick={() => setSearchParams({ page: String(Math.max(1, startPage - 1)), perPage: String(pageSize) })}
-            disabled={!hasPrevWindow}
-            aria-label="이전 묶음"
-          >←</button>
 
-          {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(n => (
+          {/* 인증 영역(비로그인 시에만 노출) */}
+          {!authed && (
+            <div className="rounded-2xl border border-[#2a2f35] bg-[#151a1f] p-5">
+              <h2 className="mb-3 text-sm tracking-widest text-[#B9B1A3]">
+                AUTHENTICATION
+              </h2>
+              
+              {/* 탭 전환 버튼 */}
+              <div className="mb-4 flex gap-2">
+                <button
+                  onClick={() => setMode("login")}
+                  className={`rounded-md border px-3 py-1.5 text-sm transition ${
+                    mode === "login"
+                      ? "border-[#E6DFD3]/60 bg-[#E6DFD3] text-[#0e1214] shadow"
+                      : "border-[#3a3f45] text-[#E6DFD3]/80 hover:border-[#E6DFD3]/40"
+                  }`}
+                >
+                  로그인
+                </button>
+                <button
+                  onClick={() => setMode("signup")}
+                  className={`rounded-md border px-3 py-1.5 text-sm transition ${
+                    mode === "signup"
+                      ? "border-[#E6DFD3]/60 bg-[#E6DFD3] text-[#0e1214] shadow"
+                      : "border-[#3a3f45] text-[#E6DFD3]/80 hover:border-[#E6DFD3]/40"
+                  }`}
+                >
+                  회원가입
+                </button>
+              </div>
+
+              {/* 로그인 폼 */}
+              {mode === "login" ? (
+                <form onSubmit={handleLogin} className="grid gap-3">
+                  <input
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="이메일"
+                    className="rounded-md border border-[#3a3f45] bg-[#0f1419] px-3 py-2 text-sm text-[#E6DFD3] placeholder:text-[#B9B1A3]/60 focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40"
+                  />
+                  <input
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="비밀번호"
+                    type="password"
+                    className="rounded-md border border-[#3a3f45] bg-[#0f1419] px-3 py-2 text-sm text-[#E6DFD3] placeholder:text-[#B9B1A3]/60 focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg border border-[#E6DFD3]/60 bg-[#E6DFD3] px-4 py-2 text-sm font-semibold text-[#0e1214] shadow transition hover:-translate-y-[1px] hover:shadow-lg active:translate-y-0"
+                  >
+                    로그인
+                  </button>
+                </form>
+              ) : (
+                /* 회원가입 폼 */
+                <form onSubmit={handleSignup} className="grid gap-3">
+                  <input
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="이메일"
+                    className="rounded-md border border-[#3a3f45] bg-[#0f1419] px-3 py-2 text-sm text-[#E6DFD3] placeholder:text-[#B9B1A3]/60 focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40"
+                  />
+                  <input
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    placeholder="아이디"
+                    className="rounded-md border border-[#3a3f45] bg-[#0f1419] px-3 py-2 text-sm text-[#E6DFD3] placeholder:text-[#B9B1A3]/60 focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40"
+                  />
+                  <input
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="비밀번호"
+                    type="password"
+                    className="rounded-md border border-[#3a3f45] bg-[#0f1419] px-3 py-2 text-sm text-[#E6DFD3] placeholder:text-[#B9B1A3]/60 focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg border border-[#E6DFD3]/60 bg-[#E6DFD3] px-4 py-2 text-sm font-semibold text-[#0e1214] shadow transition hover:-translate-y-[1px] hover:shadow-lg active:translate-y-0"
+                  >
+                    회원가입
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+        
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-[1.1fr,1fr]">
+            <form onSubmit={create} className="rounded-2xl border border-[#2a2f35] bg-[#151a1f] p-5">
+              {/* 글 작성 폼(로그인해야 활성화) */}
+              <h2 className="mb-3 text-sm tracking-widest text-[#B9B1A3]">
+                NEW ENTRY
+              </h2>
+              <div className="grid gap-3">
+                <input
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder={authed ? "제목" : "로그인 후 작성 가능"}
+                  disabled={!authed}
+                  className="rounded-md border border-[#3a3f45] bg-[#0f1419] px-3 py-2 text-sm text-[#E6DFD3] placeholder:text-[#B9B1A3]/60 focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40 disabled:opacity-40"
+                />
+                <textarea
+                  value={body}
+                  onChange={e => setBody(e.target.value)}
+                  placeholder={authed ? "내용" : "로그인 후 작성 가능"}
+                  disabled={!authed}
+                  rows={4}
+                  className="resize-none rounded-md border border-[#3a3f45] bg-[#0f1419] px-3 py-2 text-sm text-[#E6DFD3] placeholder:text-[#B9B1A3]/60 focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40 disabled:opacity-40"
+                />
+                <button
+                  type="submit"
+                  disabled={!authed}
+                  className="ml-auto rounded-lg border border-[#E6DFD3]/60 bg-[#E6DFD3] px-4 py-2 text-sm font-semibold text-[#0e1214] shadow transition hover:-translate-y-[1px] hover:shadow-lg active:translate-y-0 disabled:opacity-40"
+                >
+                  등록
+                </button>
+              </div>
+            </form>
+            <aside className="rounded-2xl border border-[#2a2f35] bg-[#151a1f] p-5">
+              <h3 className="mb-2 text-sm tracking-widest text-[#B9B1A3]">CONCEPT</h3>
+              <p className="text-sm text-[#E6DFD3]/90">
+                베이지 포인트의 카세트 퓨처리즘 보드. CRT 감성과 카세트 데크의 물성을 살린 아날로그-레트로 UI. 전광판(LED) 스타일 마퀴와 테이프 릴 애니메이션으로 분위기 구현.
+              </p>
+              <ul className="mt-3 list-disc pl-5 text-xs text-[#B9B1A3]">
+                <li>
+                  Primary accent:{" "}
+                  <span className="font-semibold text-[#E6DFD3]">Beige</span>
+                </li>
+                <li>Pointer highlights: Black & Yellow micro-accents</li>
+                <li>Surfaces: gunmetal / midnight navy tiers</li>
+              </ul>
+            </aside>
+          </div>
+
+          <div className="flex gap-3 items-center">
+            <label className="text-sm text-[#B9B1A3]">페이지당 표시 글</label>
+            <select
+              value={String(pageSize)}
+              onChange={e => setSearchParams({ page: "1", perPage: e.target.value, pages: String(displayPageNum) })}
+              className="rounded-md border border-[#3a3f45] bg-[#0f1419] px-3 py-1.5 text-sm text-[#E6DFD3] focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40"
+            >
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+            </select>
+          </div>
+
+
+          {/* Post list (cassette style) */}
+          <CassettePostsSection
+            posts={cassettePosts}
+            onSelect={handleSelectPost}
+          />
+          <div ref={pagerRef} className="flex flex-wrap gap-2 justify-center items-center mt-4">
             <button
-              key={n}
-              className={`px-3 py-1 border rounded ${n === page ? "bg-black text-white" : ""}`}
-              onClick={() => setSearchParams({ page: String(n), perPage: String(pageSize) })}
-            >{n}</button>
-          ))}
+              className="px-3 py-1 border rounded disabled:opacity-40"
+              onClick={() => setSearchParams({ page: String(Math.max(1, startPage - 1)), perPage: String(pageSize) })}
+              disabled={!hasPrevWindow}
+              aria-label="이전 묶음"
+            >←</button>
 
-          <button
-            className="px-3 py-1 border rounded disabled:opacity-40"
-            onClick={() => setSearchParams({ page: String(endPage + 1), perPage: String(pageSize) })}
-            disabled={!hasNextWindow}
-            aria-label="다음 묶음"
-          >→</button>
+            {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(n => (
+              <button
+                key={n}
+                className={`px-3 py-1 border rounded ${n === page ? "bg-black text-white" : ""}`}
+                onClick={() => setSearchParams({ page: String(n), perPage: String(pageSize) })}
+              >{n}</button>
+            ))}
+
+            <button
+              className="px-3 py-1 border rounded disabled:opacity-40"
+              onClick={() => setSearchParams({ page: String(endPage + 1), perPage: String(pageSize) })}
+              disabled={!hasNextWindow}
+              aria-label="다음 묶음"
+            >→</button>
+          </div>
         </div>
-      </div>
-    </CassetteLayout>
+      </CassetteLayout>
+    </>
   );
 }
