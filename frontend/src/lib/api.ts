@@ -24,6 +24,35 @@ function notifyLoggedOut() {
   window.dispatchEvent(new CustomEvent("auth:logout"));
 }
 
+// 경로 화이트리스트 판정
+function isAuthFlowPath(path: string) {
+  return AUTH_FLOW_WHITELIST.some(p => path.startsWith(p));
+}
+
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  payload?: unknown;
+  constructor(status: number, message: string, code?: string, payload?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.payload = payload;
+  }
+}
+
+// 인증 플로우 경로(여기에서의 401/403은 "세션 만료"로 취급하지 않음)
+const AUTH_FLOW_WHITELIST = [
+  "/auth/login",
+  "/auth/signup",
+  "/auth/start",
+  "/auth/verify",
+  "/auth/verify-email",
+  "/auth/verify-email/resend",
+];
+
+
 /** 공통 요청 함수
  * - auth=true면 자동으로 Authorization 헤더 첨부
  * - 401이면 토큰 비우고 'auth:logout' 이벤트 발생
@@ -48,12 +77,25 @@ async function request(
     if (tok) headers.set("Authorization", `Bearer ${tok}`);
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  if (res.status === 401) {
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: "include" });
+
+  // 2xx면 그대로 반환
+  if (res.ok) return res;
+
+  // 에러 바디 파싱 시도(detail.code/message 지원)
+  let body: any = null;
+  try { body = await res.json(); } catch { /* ignore */ }
+  const detail = body?.detail ?? body; // FastAPI는 detail에 메시지를 담는 경우가 많음
+  const code = typeof detail === "object" ? detail?.code : undefined;
+  const msg  = typeof detail === "object" ? (detail?.message ?? res.statusText) : (detail ?? res.statusText);
+  
+  // 전역 로그아웃 트리거: 인증 플로우 경로는 예외
+  if ((res.status === 401 || res.status === 403) && !isAuthFlowPath(path)) {
     setToken(null);
     notifyLoggedOut();
   }
-  return res;
+  
+  throw new ApiError(res.status, String(msg), code, body);
 }
 
 async function apiFetch(path: string, init: RequestInit = {}) {
@@ -68,7 +110,7 @@ async function apiFetch(path: string, init: RequestInit = {}) {
     headers.set("Authorization", `Bearer ${t}`);
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, mode: "cors" });
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, mode: "cors", credentials: "include" });
 
   // 토큰 만료 시 전역 이벤트
   if (res.status === 401) {

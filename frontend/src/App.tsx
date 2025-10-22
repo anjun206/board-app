@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 // lib/api 래퍼/도우미 사용
 import {
   API_BASE,
+  ApiError,
   listPosts,
   createPost as apiCreatePost,
   signup as apiSignup,
@@ -246,8 +247,44 @@ export default function App() {
       setTokenState(data.access_token);             // 상태만 반영
       setMe(data.user);
       setEmail(""); setPassword("");
-    } catch {
-      alert("로그인 실패");
+    } catch (err: any) {
+    // ApiError면 status/code로 분기
+    if (err instanceof ApiError) {
+      // 백엔드가 detail = { code, message } 형태로 내려줄 때를 우선 반영
+      const code = err.code;
+
+      // 403: 이메일 미인증 등 접근 거부
+      if (err.status === 403) {
+        if (code === "EMAIL_NOT_VERIFIED") {
+          alert("이메일 미인증 상태입니다. 메일함을 확인해 주세요.\n(인증 메일 재전송: 프로필/로그인 화면에서 가능)");
+        } else {
+          alert("접근이 거부되었습니다.");
+        }
+        return;
+      }
+      
+      if (err.status === 401) {
+        //EPP가 있을 때 WRONG_PASSWORD, 없으면 INVALID_CREDENTIALS 같은 코드가 오도록 백엔드 수정 권장
+        if (code === "WRONG_PASSWORD") {
+          alert("비밀번호가 올바르지 않습니다.");
+          return;
+        }
+        alert("이메일 또는 비밀번호가 올바르지 않습니다.");
+        return;
+      }
+
+      if (err.status === 400) {
+        alert(typeof err.message === "string" ? err.message : "요청이 올바르지 않습니다.");
+        return;
+      }
+
+      // 기타
+      alert(`오류가 발생했습니다. (${err.status})`);
+      return;
+      }
+
+      // 예상치 못한 에러
+      alert("로그인 중 오류가 발생했습니다.");
     }
   }
 
