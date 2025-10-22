@@ -3,7 +3,7 @@ import neodgmTTF from "../../public/fonts/neodgm.ttf"
 import neodgmCodeTTF from "../../public/fonts/neodgm_code.ttf"
 
 export type TagKey = "log" | "maint" | "notice";
-type FilterKey = "all" | TagKey;
+type TransportMode = "stop" | "play" | "double";
 
 type Post = {
   id: string;
@@ -31,13 +31,6 @@ interface MyWidgetProps {
   onLike?: (id: string) => void;
   onSelectPost?: (id: string) => void;
 }
-
-const FILTER_OPTIONS = [
-  { key: "all", label: "All" },
-  { key: "log", label: "Logs" },
-  { key: "maint", label: "Maintenance" },
-  { key: "notice", label: "Notice" },
-] as const;
 
 const FONT_STACKS = {
   neo: '"NeoDunggeunmo", ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
@@ -121,24 +114,12 @@ export default function MyWidget({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [author, setAuthor] = useState("USER-01");
-  const [filter, setFilter] = useState<FilterKey>("all");
-  const [query, setQuery] = useState("");
-
-  type TransportMode = "stop" | "play" | "double";
 
   const BASE_RPS_CONST = 0.25; // your original base motor speed
   const [transport, setTransport] = useState<TransportMode>("play");
   const [isRec, setIsRec] = useState(false);
 
-  const filtered = useMemo(() => {
-    const scoped =
-      filter === "all" ? posts : posts.filter((p) => p.tag === filter);
-    return scoped.filter((p) =>
-      (p.title + p.author)
-        .toLowerCase()
-        .includes(query.toLowerCase())
-    );
-  }, [posts, filter, query]);
+  const filtered = posts;
 
   useEffect(() => {
     if (!externalPosts) return;
@@ -178,10 +159,14 @@ export default function MyWidget({
   return (
     <CassetteLayout>
       <CassetteHeader
-        filter={filter}
-        onFilterChange={setFilter}
-        query={query}
-        onQueryChange={setQuery}
+        transport={transport}
+        setTransport={setTransport}
+        isRec={isRec}
+        toggleRec={() => {
+          // 정지 중 REC 누르면 1×로 자동 전환하고 REC 토글
+          if (!isRec && transport === "stop") setTransport("play");
+          setIsRec(v => !v);
+        }}
       />
 
       {!readOnly && (
@@ -220,17 +205,17 @@ export function CassetteLayout({ children }: { children: React.ReactNode }) {
 }
 
 interface CassetteHeaderProps {
-  filter: FilterKey;
-  onFilterChange: (value: FilterKey) => void;
-  query: string;
-  onQueryChange: (value: string) => void;
+  transport: TransportMode;               // "stop" | "play" | "double"
+  setTransport: (t: TransportMode) => void;
+  isRec: boolean;
+  toggleRec: () => void;
 }
 // 상단 카세트 헤더: LED 마퀴, 필터 UI, 릴 패널을 묶습니다.
 export function CassetteHeader({
-  filter,
-  onFilterChange,
-  query,
-  onQueryChange,
+  transport,
+  setTransport,
+  isRec,
+  toggleRec,
 }: CassetteHeaderProps) {
   return (
     <header className="relative overflow-hidden rounded-2xl border border-[#2a2f35] bg-[#151a1f] shadow-[0_8px_40px_rgba(0,0,0,0.45)]">
@@ -270,159 +255,177 @@ export function CassetteHeader({
             </p>
           </div>
 
-          <FilterBar
-            filter={filter}
-            onFilterChange={onFilterChange}
-            query={query}
-            onQueryChange={onQueryChange}
-          />
-        </div>
+          {/* 전송 버튼들 */}
+            <TransportBar
+              transport={transport}
+              setTransport={setTransport}
+              isRec={isRec}
+              toggleRec={toggleRec}
+            />
+          </div>
 
-        <CassettePanel />
+        <CassettePanel transport={transport} isRec={isRec} />
       </div>
     </header>
   );
 }
 
-interface FilterBarProps {
-  filter: FilterKey;
-  onFilterChange: (value: FilterKey) => void;
-  query: string;
-  onQueryChange: (value: string) => void;
-}
-// 필터 버튼과 검색 입력 필드를 담당하는 서브 컴포넌트입니다.
-function FilterBar({
-  filter,
-  onFilterChange,
-  query,
-  onQueryChange,
-}: FilterBarProps) {
+// ● REC만 표시하는 LED
+function RecOnly() {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {FILTER_OPTIONS.map(({ key, label }) => (
-        <button
-          key={key}
-          onClick={() => onFilterChange(key)}
-          className={clsx(
-            "rounded-md border px-3 py-1.5 text-sm transition",
-            filter === key
-              ? "border-[#E6DFD3]/60 bg-[#E6DFD3] text-[#0e1214] shadow"
-              : "border-[#3a3f45] text-[#E6DFD3]/80 hover:border-[#E6DFD3]/40"
-          )}
-        >
-          {label}
-        </button>
-      ))}
-      <div className="ml-auto">
-        <input
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="...검색"
-          className="w-44 rounded-md border border-[#3a3f45] bg-[#11161b] px-3 py-1.5 text-sm text-[#E6DFD3] placeholder:text-[#B9B1A3]/60 focus:outline-none focus:ring-2 focus:ring-[#E6DFD3]/40"
-        />
+    <div className="flex h-16 items-center justify-center">
+      <div
+        className="text-[21px] font-bold tracking-[0.15em]"
+        style={{ fontFamily: FONT_STACKS.code }}
+      >
+        <span className="text-red-500 drop-shadow-[0_0_6px_rgba(255,0,0,0.8)]">• REC</span>
       </div>
     </div>
   );
 }
-// 순수 시각적 요소인 카세트 릴 장식입니다.
-function CassettePanel() {
-    return <ReelsInteractive />;
+
+// 전송 버튼 묶음
+function TransportBar({
+  transport,
+  setTransport,
+  isRec,
+  toggleRec,
+}: {
+  transport: "stop" | "play" | "double";
+  setTransport: (t: "stop" | "play" | "double") => void;
+  isRec: boolean;
+  toggleRec: () => void;
+}) {
+  const baseBtn = "rounded-md border px-3 py-1.5 text-sm transition select-none";
+  const idle = "border-[#3a3f45] text-[#E6DFD3]/80 hover:border-[#E6DFD3]/40";
+  const active = "border-[#E6DFD3]/60 bg-[#E6DFD3] text-[#0e1214] shadow";
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        onClick={() => setTransport("stop")}
+        className={clsx(baseBtn, transport === "stop" ? active : idle)}
+      >
+        ■ 정지
+      </button>
+      <button
+        onClick={() => setTransport("play")}
+        className={clsx(baseBtn, transport === "play" ? active : idle)}
+      >
+        ▶ 재생
+      </button>
+      <button
+        onClick={() => setTransport("double")}
+        className={clsx(baseBtn, transport === "double" ? active : idle)}
+      >
+        <span className="inline-block origin-left scale-x-50 tracking-[-0.18em] mr-[-0.4em] leading-none">
+          ▶▶
+        </span>
+        <span className="ml-1">배속</span>
+      </button>
+
+      <button
+        onClick={() => {
+          if (!isRec && transport === "stop") setTransport("play"); // 정지 상태에서 REC → 1×
+          toggleRec();
+        }}
+        className={clsx(
+          baseBtn,
+          "ml-2",
+          isRec
+            ? "border-red-500/70 bg-red-500/90 text-[#0e1214] shadow"
+            : "border-red-500/50 text-red-400 hover:border-red-400/80"
+        )}
+      >
+        ● REC
+      </button>
+    </div>
+  );
 }
 
-/** Interactive cassette reels with motor + drag + inertia + sync */
-function ReelsInteractive() {
-  // physics params (tweak freely)
-  const BASE_RPS = 0.25;            // base rotation per second (revolutions)
-  const BASE_OMEGA = BASE_RPS * 2 * Math.PI; // rad/s (left reel +, right reel -)
-  const RETURN_RATE = 2.0;          // how fast we blend back to base speed (1/s)
-  const FRICTION = 0.15;            // passive damping when not dragging (1/s)
-  const MAX_OMEGA = 8 * Math.PI;    // clamp spin madness (rad/s)
+// 순수 시각적 요소인 카세트 릴 장식입니다.
+function CassettePanel({ transport, isRec }: { transport: "stop" | "play" | "double"; isRec: boolean }) {
+  return <ReelsInteractive transport={transport} isRec={isRec} />;
+}
 
-  // master angle/velocity (left reel). right reel mirrors it.
-  const [angle, setAngle] = useState(0);      // radians
+
+/** Interactive cassette reels with motor + drag + inertia + sync */
+function ReelsInteractive({
+  transport,
+  isRec,
+}: {
+  transport: "stop" | "play" | "double";
+  isRec: boolean;
+}) {
+  const BASE_RPS = 0.25;            // 1×
+  const RETURN_RATE = 2.0;
+  const FRICTION = 0.15;
+  const MAX_OMEGA = 8 * Math.PI;
+
+  const BASE_OMEGA = BASE_RPS * 2 * Math.PI;
+  const SPEED_MULT = transport === "stop" ? 0 : transport === "play" ? 1 : 2;
+  const TARGET_OMEGA = BASE_OMEGA * SPEED_MULT;  // 좌 릴 목표 각속도
+
+  const [angle, setAngle] = useState(0);
   const angleRef = useRef(angle);
-  const [omega, setOmega] = useState(BASE_OMEGA);
+  const [omega, setOmega] = useState(TARGET_OMEGA);
   const omegaRef = useRef(omega);
 
-  // dragging state
+  useEffect(() => { angleRef.current = angle; }, [angle]);
+  useEffect(() => { omegaRef.current = omega; }, [omega]);
+
   const draggingRef = useRef<null | {
     reel: "left" | "right";
     centerX: number;
     centerY: number;
-    prevPointerAngle: number; // screen angle last frame
+    prevPointerAngle: number;
   }>(null);
 
   const leftRef = useRef<HTMLDivElement | null>(null);
   const rightRef = useRef<HTMLDivElement | null>(null);
 
-  // keep refs hot
-  useEffect(() => { angleRef.current = angle; }, [angle]);
-  useEffect(() => { omegaRef.current = omega; }, [omega]);
-
-  // rAF loop
   useEffect(() => {
     let raf = 0;
     let prev = performance.now();
 
     const tick = (now: number) => {
-      const dt = Math.max(0, Math.min(0.05, (now - prev) / 1000)); // clamp dt
+      const dt = Math.max(0, Math.min(0.05, (now - prev) / 1000));
       prev = now;
 
       const dragging = draggingRef.current;
-
       let nextAngle = angleRef.current;
       let nextOmega = omegaRef.current;
 
       if (dragging) {
-        // while grabbing: follow pointer angle, compute instantaneous omega
-        // (we keep the master angle in left-reel space; right reel is mirrored)
         const { centerX, centerY, reel, prevPointerAngle } = dragging;
         const screenAngle = getPointerScreenAngle(latestPointerPos.x, latestPointerPos.y, centerX, centerY);
+        let d = unwrapDelta(screenAngle - prevPointerAngle);
+        dragging.prevPointerAngle = screenAngle;
 
-        // unwrap delta to (-PI..PI)
-        let d = screenAngle - prevPointerAngle;
-        d = unwrapDelta(d);
-
-        dragging.prevPointerAngle = screenAngle; // update
-
-        // map to master space (right reel is mirrored)
         const mapped = reel === "left" ? d : -d;
-
-        // integrate: angle follows pointer, omega from pointer velocity
         nextAngle = nextAngle + mapped;
-        nextOmega = mapped / Math.max(1e-6, dt); // rad/s from last delta
+        nextOmega = mapped / Math.max(1e-6, dt);
       } else {
-        // free run: apply damping + return-to-base-speed
-        const target = BASE_OMEGA; // base for left reel
-        const blend = 1 - Math.exp(-RETURN_RATE * dt); // exponential approach
-        nextOmega = nextOmega + (target - nextOmega) * blend;
-
-        // light friction so wild flicks decay
+        const blend = 1 - Math.exp(-RETURN_RATE * dt);
+        nextOmega = nextOmega + (TARGET_OMEGA - nextOmega) * blend;
         nextOmega *= Math.exp(-FRICTION * dt);
-
-        // integrate
         nextAngle = nextAngle + nextOmega * dt;
       }
 
-      // clamp absurd speeds
       if (nextOmega >  MAX_OMEGA) nextOmega =  MAX_OMEGA;
       if (nextOmega < -MAX_OMEGA) nextOmega = -MAX_OMEGA;
 
-      // commit
       setAngle(nextAngle);
       setOmega(nextOmega);
-
       raf = requestAnimationFrame(tick);
     };
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [TARGET_OMEGA]); // 전송 모드 바뀌면 목표속도 재설정
 
-  // pointer tracking (we keep last pos globally to avoid extra listeners on window)
   const latestPointerPos = useRef({ x: 0, y: 0 }).current;
 
-  // shared handlers
   const onPointerDown = (reel: "left" | "right", ref: React.RefObject<HTMLDivElement>) =>
     (e: React.PointerEvent) => {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -434,12 +437,7 @@ function ReelsInteractive() {
       latestPointerPos.y = e.clientY;
       const startAngle = getPointerScreenAngle(e.clientX, e.clientY, cx, cy);
 
-      draggingRef.current = {
-        reel,
-        centerX: cx,
-        centerY: cy,
-        prevPointerAngle: startAngle,
-      };
+      draggingRef.current = { reel, centerX: cx, centerY: cy, prevPointerAngle: startAngle };
     };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -450,14 +448,12 @@ function ReelsInteractive() {
 
   const onPointerUp = (e: React.PointerEvent) => {
     if (!draggingRef.current) return;
-    // release: keep whatever omega the user imparted; rAF will ease to base
     draggingRef.current = null;
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
   };
 
-  // render: right reel mirrors the left (angle/omega opposite)
   const leftAngle = angle;
-  const rightAngle = -angle; // perfect sync, opposite direction
+  const rightAngle = -angle;
 
   return (
     <div
@@ -469,18 +465,10 @@ function ReelsInteractive() {
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(120deg,transparent,rgba(255,255,255,.06),transparent)]" />
       <div className="grid grid-cols-2 items-center gap-4">
         <div ref={leftRef}>
-          <ReelVisual
-            angleRad={leftAngle}
-            ariaLabel="Left reel"
-            onPointerDown={onPointerDown("left", leftRef)}
-          />
+          <ReelVisual angleRad={leftAngle} ariaLabel="Left reel" onPointerDown={onPointerDown("left", leftRef)} />
         </div>
         <div ref={rightRef}>
-          <ReelVisual
-            angleRad={rightAngle}
-            ariaLabel="Right reel"
-            onPointerDown={onPointerDown("right", rightRef)}
-          />
+          <ReelVisual angleRad={rightAngle} ariaLabel="Right reel" onPointerDown={onPointerDown("right", rightRef)} />
         </div>
       </div>
 
@@ -495,12 +483,10 @@ function ReelsInteractive() {
     </div>
   );
 
-  // --- helpers ---
   function getPointerScreenAngle(px: number, py: number, cx: number, cy: number) {
     return Math.atan2(py - cy, px - cx);
   }
   function unwrapDelta(d: number) {
-    // map to (-PI..PI) so fast drag across 180° doesn't jump
     if (d > Math.PI) d -= 2 * Math.PI;
     if (d < -Math.PI) d += 2 * Math.PI;
     return d;

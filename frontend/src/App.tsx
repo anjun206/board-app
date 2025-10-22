@@ -48,6 +48,9 @@ type Post = {
 type User = { id: string; email: string; username: string };
 type TokenResp = { access_token: string; token_type: string; user: User };
 
+// css용
+type TransportMode = "stop" | "play" | "double";
+
 export default function App() {
   // ---------------------------
   // 상태 정의(React state)
@@ -109,8 +112,15 @@ export default function App() {
   const hasPrevWindow = startPage > 1;
   const hasNextWindow = endPage < lastPage;
 
-  const [filter, setFilter] = useState<"all" | TagKey>("all");
-  const [query, setQuery] = useState("");
+  // CassetteHeader용 상태
+  const [transport, setTransport] = useState<TransportMode>("play");
+  const [isRec, setIsRec] = useState(false);
+
+  const toggleRec = useCallback(() => {
+  // 정지 상태에서 REC 누르면 1×로 자동 전환
+    if (!isRec && transport === "stop") setTransport("play");
+    setIsRec(v => !v);
+  }, [isRec, transport]);
 
 
   const deriveCassetteTag = useCallback(
@@ -273,10 +283,10 @@ export default function App() {
           </div>
 
         <CassetteHeader
-          filter={filter}
-          onFilterChange={setFilter}
-          query={query}
-          onQueryChange={setQuery}
+          transport={transport}
+          setTransport={setTransport}
+          isRec={isRec}
+          toggleRec={toggleRec}
         />
 
           {/* 인증 영역(비로그인 시에만 노출) */}
