@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.0"/>
+    </linearGradient>
+  </defs>
+  <!-- circular badge -->
+  <circle cx="128" cy="128" r="120" fill="#E6DFD3"/>
+  <!-- inner shadow ring -->
+  <circle cx="128" cy="128" r="118" fill="none" stroke="#2a2f35" stroke-width="4" opacity="0.5"/>
+  <!-- cassette body -->
+  <rect x="58" y="86" width="140" height="84" rx="12" fill="#0e1214" stroke="#2a2f35" stroke-width="4"/>
+  <!-- label strip -->
+  <rect x="70" y="98" width="116" height="18" rx="4" fill="#2FA4A2" opacity="0.9"/>
+  <!-- window -->
+  <rect x="78" y="122" width="100" height="20" rx="6" fill="#14191e" stroke="#2a2f35" stroke-width="2"/>
+  <!-- reels -->
+  <circle cx="98" cy="132" r="10" fill="#B8569A"/>
+  <circle cx="158" cy="132" r="10" fill="#B8569A"/>
+  <!-- screws -->
+  <circle cx="66" cy="94" r="3" fill="#2a2f35"/>
+  <circle cx="190" cy="94" r="3" fill="#2a2f35"/>
+  <circle cx="66" cy="166" r="3" fill="#2a2f35"/>
+  <circle cx="190" cy="166" r="3" fill="#2a2f35"/>
+  <!-- tiny REC indicator -->
+  <circle cx="182" cy="108" r="4" fill="#E8BE3A"/>
+  <!-- highlight sweep -->
+  <ellipse cx="90" cy="70" rx="160" ry="60" transform="rotate(-20 90 70)" fill="url(#g)" />
+</svg>
