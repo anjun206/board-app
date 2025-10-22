@@ -1,71 +1,119 @@
-import React, { createContext, useCallback, useContext, useState } from "react"; // React 훅/컨텍스트
+import React, { createContext, useCallback, useContext, useState } from "react";
 
-// 모달에 넘길 옵션(필요하면 더 추가 가능)
-export type ConfirmOptions = {                       // 모달 한 번을 구성하는 옵션 타입
-  title?: string;                                    // 모달 제목(선택)
-  message: string;                                   // 본문 메시지(필수)
-  confirmText?: string;                              // 확인 버튼 라벨(기본: "확인")
-  cancelText?: string;                               // 취소 버튼 라벨(기본: "취소")
-  danger?: boolean;                                  // 빨간 버튼 스타일 여부
-  clickOutsideToCancel?: boolean;                    // 오버레이 클릭으로 닫을지(기본 true)
+export type ConfirmOptions = {
+  title?: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  danger?: boolean;
+  clickOutsideToCancel?: boolean;
 };
 
-type ConfirmContextValue = {                         // 컨텍스트에 넣을 함수 타입
-  confirm: (opts: ConfirmOptions) => Promise<boolean>; // 열고(true/false)로 resolve
+type ConfirmContextValue = {
+  confirm: (opts: ConfirmOptions) => Promise<boolean>;
 };
 
-const ConfirmContext = createContext<ConfirmContextValue | null>(null); // 컨텍스트 생성
+const ConfirmContext = createContext<ConfirmContextValue | null>(null);
 
-export function useConfirm() {                       // 어디서든 confirm() 쓸 수 있게 훅 제공
-  const ctx = useContext(ConfirmContext);            // 컨텍스트 접근
-  if (!ctx) throw new Error("useConfirm must be used within <ConfirmProvider>"); // 안전장치
-  return ctx.confirm;                                // confirm 함수 반환
+export function useConfirm() {
+  const ctx = useContext(ConfirmContext);
+  if (!ctx) throw new Error("useConfirm must be used within <ConfirmProvider>");
+  return ctx.confirm;
+}
+
+function ScrewGlyph({ small = false }: { small?: boolean }) {
+  return (
+    <span
+      className={`relative inline-flex ${
+        small ? "h-3 w-3 border" : "h-4 w-4 border-2"
+      } items-center justify-center rounded-full border-[#2a2f35] bg-[#0d1116] shadow-inner`}
+      aria-hidden
+    >
+      <span className="absolute block h-px w-3 -rotate-45 bg-[#B9B1A3]" />
+      <span className="absolute block h-px w-3 rotate-45 bg-[#B9B1A3]" />
+    </span>
+  );
 }
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);           // 모달 열림 여부
-  const [opts, setOpts] = useState<ConfirmOptions | null>(null); // 현재 모달 옵션
-  const [resolver, setResolver] = useState<((v: boolean) => void) | null>(null); // Promise resolver 저장
+  const [open, setOpen] = useState(false);
+  const [opts, setOpts] = useState<ConfirmOptions | null>(null);
+  const [resolver, setResolver] = useState<((v: boolean) => void) | null>(null);
 
-  const confirm = useCallback((o: ConfirmOptions) => { // 모달 띄우기
-    setOpts({ clickOutsideToCancel: true, ...o });      // 기본값 병합
-    setOpen(true);                                      // 열기
-    return new Promise<boolean>((resolve) => {          // Promise 생성
-      setResolver(() => resolve);                       // resolve 저장해두기
+  const confirm = useCallback((o: ConfirmOptions) => {
+    setOpts({ clickOutsideToCancel: true, ...o });
+    setOpen(true);
+    return new Promise<boolean>((resolve) => {
+      setResolver(() => resolve);
     });
   }, []);
 
-  const close = (v: boolean) => {                    // 닫기(확인:true / 취소:false)
-    setOpen(false);                                   // 닫힘
-    resolver?.(v);                                    // 대기 중이던 Promise resolve
-    setResolver(null);                                // 정리
+  const close = (v: boolean) => {
+    setOpen(false);
+    resolver?.(v);
+    setResolver(null);
   };
 
+  const confirmButtonClass = (danger?: boolean) =>
+    danger
+      ? "rounded-lg border border-red-500/60 bg-red-500/15 px-5 py-2 text-sm font-semibold text-red-200 transition hover:border-red-400 hover:bg-red-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
+      : "rounded-lg border border-[#E6DFD3]/60 bg-[#E6DFD3] px-5 py-2 text-sm font-semibold text-[#0e1214] transition hover:-translate-y-px hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E6DFD3]/40";
+
   return (
-    <ConfirmContext.Provider value={{ confirm }}>     {/* 하위에서 useConfirm 사용 가능 */}
+    <ConfirmContext.Provider value={{ confirm }}>
       {children}
 
-      {open && opts && (                              // 모달이 열려있으면 렌더링
-        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
-          {/* 오버레이 */}
+      {open && opts && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center px-4 py-6"
+          role="dialog"
+          aria-modal="true"
+        >
           <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => (opts.clickOutsideToCancel ?? true) && close(false)} // 바깥 클릭 → 취소
+            className="absolute inset-0 bg-[#050709]/80 backdrop-blur-sm"
+            onClick={() => (opts.clickOutsideToCancel ?? true) && close(false)}
           />
-          {/* 카드 */}
-          <div className="relative w-[92%] max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            {opts.title && <div className="text-lg font-semibold mb-2">{opts.title}</div>} {/* 제목(선택) */}
-            <div className="text-sm text-gray-700 whitespace-pre-wrap">{opts.message}</div> {/* 본문 */}
-            <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => close(false)} className="px-3 py-1 border rounded">
-                {opts.cancelText ?? "취소"}            {/* 취소 버튼 */}
-              </button>
-              <button
-                onClick={() => close(true)}
-                className={`px-3 py-1 rounded text-white ${opts.danger ? "bg-red-600 hover:bg-red-700" : "bg-black hover:bg-gray-800"}`}
-              >
-                {opts.confirmText ?? "확인"}           {/* 확인 버튼 */}
-              </button>
+          <div className="relative w-full max-w-lg overflow-hidden rounded-[28px] border border-[#2a2f35] bg-[#11161b] text-[#E6DFD3] shadow-[0_25px_80px_rgba(0,0,0,0.65)]">
+            <div className="pointer-events-none absolute inset-0 opacity-10" aria-hidden>
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,#FFEFD0_0%,transparent_55%)]" />
+              <div className="absolute inset-0 bg-[repeating-linear-gradient(0deg,transparent,transparent_3px,rgba(255,255,255,0.04)_3px,rgba(255,255,255,0.04)_4px)]" />
+            </div>
+
+            <div className="relative flex flex-col gap-6 p-6 sm:p-8">
+              <header className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.35em] text-[#B9B1A3]">
+                <div className="flex items-center gap-2">
+                  <ScrewGlyph />
+                  <span>{opts.title ?? "SYSTEM PROMPT"}</span>
+                </div>
+                <div className="flex items-center gap-1 text-[#7f878f]">
+                  <span className="inline-block h-2 w-2 rounded-sm bg-yellow-400" />
+                  <span className="inline-block h-2 w-2 rounded-sm bg-[#E6DFD3]" />
+                  <span className="inline-block h-2 w-2 rounded-sm bg-[#B9B1A3]" />
+                </div>
+              </header>
+
+              <div className="rounded-2xl border border-[#2a2f35] bg-[#0f1419] p-5 text-sm leading-relaxed text-[#E6DFD3]/90 shadow-inner">
+                <div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-[#7f878f]">
+                  <ScrewGlyph small />
+                  <span>Message</span>
+                </div>
+                <p className="whitespace-pre-wrap">{opts.message}</p>
+              </div>
+
+              <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-end">
+                <button
+                  onClick={() => close(false)}
+                  className="rounded-lg border border-[#3a3f45] bg-[#0f1419] px-5 py-2 text-sm font-medium text-[#E6DFD3] transition hover:border-[#E6DFD3]/40 hover:bg-[#151a1f] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E6DFD3]/20"
+                >
+                  {opts.cancelText ?? "취소"}
+                </button>
+                <button
+                  onClick={() => close(true)}
+                  className={confirmButtonClass(opts.danger)}
+                >
+                  {opts.confirmText ?? "확인"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
