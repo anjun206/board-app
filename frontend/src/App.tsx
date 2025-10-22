@@ -320,12 +320,12 @@ export default function App() {
             <div className="flex items-center gap-4">
               <h1 className="text-2xl text-yellow-600 animate-[flicker_2s_infinite]">new!</h1>
               <h1 className="text-2xl">  네-오 채신 게시판</h1>
-              <Link
+              {/* <Link
                 to="/demo/cassette"
                 className="text-sm text-blue-600 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
               >
                 Cassette 데모
-              </Link>
+              </Link> */}
             </div>
             {authed ? (
               <div className="flex items-center gap-3">

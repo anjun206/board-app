@@ -912,7 +912,7 @@ export function ReelVisual({
 }) {
   return (
     <div
-      className="relative mx-auto aspect-square w-36 rounded-full border border-[#2e343a] bg-[#0f1419] p-3 shadow-inner touch-none"
+      className="relative mx-auto aspect-square w-36 rounded-full border border-[#2e343a] bg-[#0f1419] p-3 shadow-[inset_0_12px_24px_rgba(0,0,0,0.8)] touch-none"
       role="slider"
       aria-label={ariaLabel}
       onPointerDown={onPointerDown}
@@ -964,7 +964,15 @@ export function ReelVisual({
           })}
         </svg>
       </div>
-      <div className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.12),transparent_50%)]" />
+      <div
+        className="pointer-events-none absolute inset-0 rounded-full"
+        style={{
+          boxShadow:
+            "inset 0 20px 30px rgba(0, 0, 0, 0.85), inset 0 -14px 22px rgba(0, 0, 0, 0.6), inset 0 0 24px rgba(0, 0, 0, 0.55)",
+          background:
+            "radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.04), transparent 60%)",
+        }}
+      />
     </div>
   );
 }
