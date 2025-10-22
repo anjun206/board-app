@@ -10,8 +10,10 @@ import {
   login as apiLogin,
   me as apiMe,
   getToken as getStoredToken,
-  setToken as saveToken,   // ← 저장용(로컬스토리지) 별칭
-  countPosts
+  setToken as saveToken,
+  countPosts,
+  refreshToken,
+  logout as apiLogout
 } from "./lib/api";
 import {
   CassetteHeader,
@@ -184,7 +186,25 @@ export default function App() {
 
   // 토큰 변동/401 자동 로그아웃
   useEffect(() => {
-    const run = async () => setMe(token ? await apiMe() : null);
+    const run = async () => {
+      if (token) {
+        const user = await apiMe();
+        if (!user) {
+          try {
+            const data = await refreshToken();
+            setTokenState(data.access_token);
+            setMe(data.user);
+          } catch {
+            setTokenState(null);
+            setMe(null);
+          }
+        } else {
+          setMe(user);
+        }
+      } else {
+        setMe(null);
+      }
+    };
     run();
     const onLogout = () => {
       setTokenState(null);
@@ -232,8 +252,8 @@ export default function App() {
   }
 
   // 로그아웃
-  function logout() {
-    saveToken(null);
+  async function logout() {
+    await apiLogout();
     setTokenState(null);
     setMe(null);
   }

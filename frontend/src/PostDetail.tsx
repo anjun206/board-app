@@ -10,6 +10,7 @@ type Post = {
   title: string;
   body: string;
   author_id: string;
+  author_username?: string;
   comments_count: number;
   likes_count: number;
   created_at: string;
@@ -187,6 +188,10 @@ export default function PostDetail() {
     () => (post && me ? me.id === post.author_id : false),
     [me, post]
   );
+  const authorDisplay = useMemo(() => {
+    if (!post) return "";
+    return post.author_username ?? post.author_id ?? "알 수 없음";
+  }, [post]);
 
   return (
     <CassetteLayout>
@@ -233,37 +238,25 @@ export default function PostDetail() {
                   <h1 className="text-3xl font-semibold text-[#F3EBDD]">
                     {post.title}
                   </h1>
-                  <dl className="flex flex-wrap gap-3 text-xs text-[#B9B1A3]">
-                    <div className="rounded-md border border-[#2a2f35] bg-[#10151a] px-3 py-1.5">
-                      <dt className="font-mono uppercase tracking-[0.3em] text-[#7f878f]">
-                        Author
-                      </dt>
-                      <dd className="mt-1 text-[#E6DFD3]">{post.author_id}</dd>
-                    </div>
-                    <div className="rounded-md border border-[#2a2f35] bg-[#10151a] px-3 py-1.5">
-                      <dt className="font-mono uppercase tracking-[0.3em] text-[#7f878f]">
-                        Created
-                      </dt>
-                      <dd className="mt-1 text-[#E6DFD3]">
-                        {formatDateTime(post.created_at)}
-                      </dd>
-                    </div>
-                    <div className="rounded-md border border-[#2a2f35] bg-[#10151a] px-3 py-1.5">
-                      <dt className="font-mono uppercase tracking-[0.3em] text-[#7f878f]">
-                        Updated
-                      </dt>
-                      <dd className="mt-1 text-[#E6DFD3]">
-                        {formatDateTime(post.updated_at)}
-                      </dd>
-                    </div>
-                  </dl>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-[#B9B1A3]">
+                    <span className="rounded-md border border-[#2a2f35] bg-[#10151a] px-3 py-1.5 text-[#E6DFD3]">
+                      작성자{" "}
+                      <span className="font-semibold text-[#F3EBDD]">
+                        {authorDisplay || "알 수 없음"}
+                      </span>
+                    </span>
+                    {post.created_at && (
+                      <span className="rounded-md border border-[#2a2f35] bg-[#10151a] px-3 py-1.5 text-[#E6DFD3]">
+                        작성일{" "}
+                        <span className="font-medium text-[#F3EBDD]">
+                          {formatDateTime(post.created_at)}
+                        </span>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <article className="relative rounded-2xl border border-[#2a2f35] bg-[#0f1419] p-6 text-[15px] leading-relaxed text-[#E6DFD3]/90 shadow-inner">
-                  <div
-                    className="pointer-events-none absolute inset-x-0 -top-24 h-40 bg-[radial-gradient(circle,#FFEFD0_0%,transparent_60%)] opacity-10"
-                    aria-hidden
-                  />
+                <article className="rounded-2xl border border-[#2a2f35] bg-[#0f1419] p-6 text-[15px] leading-relaxed text-[#E6DFD3]/90 shadow-inner">
                   <div className="whitespace-pre-wrap">{post.body}</div>
                 </article>
 

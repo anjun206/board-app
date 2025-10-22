@@ -169,3 +169,28 @@ export async function unlike(postId: string) {
   const res = await request(`/posts/${postId}/likes`, { method: "DELETE" }, { auth: true });
   if (!res.ok) throw new Error("unlike failed");
 }
+
+export async function refreshToken() {
+  const res = await fetch(`${API_BASE}/auth/refresh`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (res.ok) {
+    const data: TokenResp = await res.json();
+    setToken(data.access_token);
+    return data;
+  }
+  throw new Error("refresh failed");
+}
+
+export async function logout() {
+  const tok = getToken();
+  if (tok) {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: { Authorization: `Bearer ${tok}` },
+    });
+  }
+  setToken(null);
+}

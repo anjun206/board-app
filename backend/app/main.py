@@ -1,10 +1,13 @@
 # 표준 라이브러리
 import os                                           # 환경변수 읽기용 표준모듈
+import secrets
+import time
 from datetime import datetime, timedelta, timezone  # 토큰 만료 등 시간 계산
+from time import perf_counter
 from typing import Optional, List                   # 타입힌트
 
 # FastAPI 본체와 에러 응답 도우미
-from fastapi import FastAPI, HTTPException, Depends, status, Response, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Response, Request, Cookie
 
 # 브라우저(프론트엔드)에서 오는 요청을 허용하기 위한 CORS 미들웨어
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,6 +52,67 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 # 비밀번호 해싱 설정(bcrypt)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+EPP_COOKIE_NAME = "epp"  # Email-Proof Pass short-lived cookie
+EPP_TTL_MINUTES = 15
+CODE_TTL_MINUTES = 10
+MAX_CODE_ATTEMPTS = 6
+
+RATE_BUCKET = {}  # naive in-memory rate limiter bucket
+def rate_limit(key: str, limit: int, per_seconds: int) -> bool:
+    now = time.time()
+    timestamps = RATE_BUCKET.setdefault(key, [])
+    RATE_BUCKET[key] = [t for t in timestamps if now - t < per_seconds]
+    if len(RATE_BUCKET[key]) >= limit:
+        return False
+    RATE_BUCKET[key].append(now)
+    return True
+
+def delay_floor(start_ts: float, target_ms: int = 280) -> None:
+    elapsed = (perf_counter() - start_ts) * 1000
+    sleep_ms = max(0.0, target_ms - elapsed)
+    if sleep_ms:
+        time.sleep(sleep_ms / 1000)
+
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+def gen_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+def create_epp(email: str) -> str:
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=EPP_TTL_MINUTES)
+    payload = {
+        "typ": "epp",
+        "sub": normalize_email(email),
+        "exp": exp,
+        "iat": now,
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+def parse_epp(token: Optional[str]) -> Optional[str]:
+    if not token:
+        return None
+    try:
+        data = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return None
+    if data.get("typ") != "epp":
+        return None
+    return data.get("sub")
+
+DUMMY_HASH = pwd_context.hash("not-a-real-password")
+
+def verify_with_dummy(plain: str, hashed: Optional[str]) -> bool:
+    if not hashed:
+        pwd_context.verify(plain, DUMMY_HASH)
+        return False
+    return pwd_context.verify(plain, hashed)
+
+async def send_email_code(email: str, code: str) -> None:
+    # TODO: integrate with real mail provider; dev uses stdout only.
+    print(f"[MAIL] to={email} code={code}")
+
 # FastAPI 애플리케이션 인스턴스 생성
 app = FastAPI()
 
@@ -71,6 +135,7 @@ db = client[MONGO_DB]                        # DB 선택
 posts = db["posts"]                          # 게시글 컬렉션
 users = db["users"]                          # 사용자 컬렉션
 comments = db["comments"]                    # 콜렉션 핸들
+verifs = db["email_verifications"]
 
 
 # =========================
@@ -179,6 +244,8 @@ async def on_startup():
     # users: 이메일/아이디는 중복 금지
     await users.create_index("email", unique=True)
     await users.create_index("username", unique=True)
+    await verifs.create_index([("email", 1), ("expires_at", 1)])
+    await verifs.create_index("expires_at", expireAfterSeconds=0)
     await comments.create_index([("post_id", 1), ("created_at", -1)])
     # posts: _id 인덱스는 MongoDB가 자동으로 {_id: 1} 생성함. 따로 만들 필요 없음.
 
@@ -220,52 +287,169 @@ async def health():
 @app.post("/auth/signup", response_model=UserOut, status_code=201)
 async def signup(u: UserCreate):
     # 중복 검사
-    if await users.find_one({"email": u.email}):
+    raw_email = str(u.email)
+    email = normalize_email(raw_email)
+    if await users.find_one({"email": email}) or await users.find_one({"email": raw_email}):
         raise HTTPException(400, "email already in use")
     if await users.find_one({"username": u.username}):
         raise HTTPException(400, "username already in use")
 
     # 사용자 저장(해시 비밀번호)
     doc = {
-        "email": u.email,
+        "email": email,
         "username": u.username,
         "password_hash": hash_password(u.password),
         "created_at": datetime.now(timezone.utc),
         "token_version": 0,
     }
     res = await users.insert_one(doc)                              # insert
-    saved = await users.find_one({"_id": res.inserted_id})         # 방금 저장한 문서 로드
-    return user_to_out(saved)                                      # 민감정보 제거 후 반환
+    saved = await users.find_one({"_id": res.inserted_id})         # ��� ������ ���� �ε�
+    return user_to_out(saved)                                      # �ΰ����� ���� �� ��ȯ
+
+
+
+
+
+class StartBody(BaseModel):
+    email: EmailStr
+
+@app.post("/auth/start")
+async def start_auth(body: StartBody, request: Request):
+    t0 = perf_counter()
+    client_ip = request.client.host if request.client else "?"
+    raw_email = str(body.email)
+    email = normalize_email(raw_email)
+
+    if not rate_limit(f"start:{client_ip}", 10, 60) or not rate_limit(f"start:{client_ip}:{email}", 5, 300):
+        delay_floor(t0)
+        raise HTTPException(status_code=429, detail="too many requests")
+
+    user = await users.find_one({"email": email}) or await users.find_one({"email": raw_email})
+    if user:
+        await verifs.delete_many({"email": email, "used": False})
+        code = gen_code()
+        await verifs.insert_one({
+            "email": email,
+            "code_hash": hash_password(code),
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=CODE_TTL_MINUTES),
+            "attempts": 0,
+            "created_ip": client_ip,
+            "used": False,
+            "created_at": datetime.now(timezone.utc),
+        })
+        await send_email_code(email, code)
+
+    delay_floor(t0)
+    return {"ok": True}
+
+class VerifyBody(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+
+@app.post("/auth/verify")
+async def verify_code(body: VerifyBody, request: Request, response: Response):
+    t0 = perf_counter()
+    client_ip = request.client.host if request.client else "?"
+    raw_email = str(body.email)
+    email = normalize_email(raw_email)
+    code = body.code.strip()
+    if not code.isdigit():
+        delay_floor(t0)
+        raise HTTPException(status_code=400, detail="invalid or expired code")
+
+    if not rate_limit(f"verify:{client_ip}", 20, 60) or not rate_limit(f"verify:{client_ip}:{email}", 10, 300):
+        delay_floor(t0)
+        raise HTTPException(status_code=429, detail="too many requests")
+
+    rec = await verifs.find_one({
+        "email": email,
+        "used": False,
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    }, sort=[("_id", -1)])
+
+    ok = False
+    if rec:
+        attempts = rec.get("attempts", 0)
+        if attempts >= MAX_CODE_ATTEMPTS:
+            ok = False
+        else:
+            ok = verify_password(code, rec["code_hash"])
+            await verifs.update_one({"_id": rec["_id"]}, {"$inc": {"attempts": 1}})
+
+    if not ok:
+        delay_floor(t0)
+        raise HTTPException(status_code=400, detail="invalid or expired code")
+
+    await verifs.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
+
+    epp_token = create_epp(email)
+    response.set_cookie(
+        key=EPP_COOKIE_NAME,
+        value=epp_token,
+        httponly=True,
+        secure=False,  # set True behind HTTPS
+        samesite="strict",
+        path="/",
+        max_age=EPP_TTL_MINUTES * 60,
+    )
+    delay_floor(t0)
+    return {"ok": True}
 
 class LoginBody(BaseModel):                                        # JSON 로그인 바디(프론트용)
     email: EmailStr
     password: str
 
-@app.post("/auth/login", response_model=TokenOut)                  # JSON 로그인(프론트에서 사용)
-async def login(body: LoginBody, response: Response):
-    user = await users.find_one({"email": body.email})
-    if not user or not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="invalid email or password")
-    token = create_access_token({"sub": str(user["_id"])})  # ← 여기!
-    refresh = create_refresh_token({"sub": str(user["_id"]), "ver": user.get("token_version", 0)})
+@app.post("/auth/login", response_model=TokenOut)                  # JSON �α���(����Ʈ���� ���)
+async def login(body: LoginBody, response: Response, epp: Optional[str] = Cookie(default=None, alias=EPP_COOKIE_NAME)):
+    t0 = perf_counter()
+    raw_email = str(body.email)
+    email = normalize_email(raw_email)
+    user = await users.find_one({"email": email}) or await users.find_one({"email": raw_email})
+
+    proved_email = parse_epp(epp)
+    proved = proved_email == email
+
+    valid = verify_with_dummy(body.password, user["password_hash"] if user else None)
+
+    if not (user and valid):
+        delay_floor(t0)
+        if proved:
+            raise HTTPException(status_code=401, detail="비밀번호가 올바르지 않습니다.")
+        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
+
+    issued_at = datetime.now(timezone.utc)
+    token = create_access_token({"sub": str(user["_id"]), "iat": issued_at})
+    refresh = create_refresh_token({"sub": str(user["_id"]), "ver": user.get("token_version", 0), "iat": issued_at})
     response.set_cookie(
         key="refresh_token",
         value=refresh,
         httponly=True,
         secure=False,
         path="/",
-        samesite="strict",
+        samesite="lax",
         max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
     )
+    response.delete_cookie(EPP_COOKIE_NAME, path="/")
+    delay_floor(t0)
     return TokenOut(access_token=token, user=user_to_out(user))
 
-@app.post("/auth/token", response_model=TokenOut)                  # Swagger Authorize 전용(폼)
+@app.post("/auth/token", response_model=TokenOut)                  # Swagger Authorize ����(��)
 async def issue_token(form: OAuth2PasswordRequestForm = Depends()):
-    # username 필드에 이메일 또는 username 둘 다 허용
-    user = await users.find_one({"email": form.username}) or await users.find_one({"username": form.username})
-    if not user or not verify_password(form.password, user["password_hash"]):
+    # 필드에 이메일 또는 username 둘 다 허용
+    identifier = form.username
+    user = None
+    if "@" in identifier:
+        email_norm = normalize_email(identifier)
+        user = await users.find_one({"email": email_norm}) or await users.find_one({"email": identifier})
+    if not user:
+        user = await users.find_one({"username": identifier})
+
+    valid = verify_with_dummy(form.password, user["password_hash"] if user else None)
+    if not (user and valid):
         raise HTTPException(status_code=401, detail="invalid email/username or password")
-    token = create_access_token({"sub": str(user["_id"])})
+
+    issued_at = datetime.now(timezone.utc)
+    token = create_access_token({"sub": str(user["_id"]), "iat": issued_at})
     return TokenOut(access_token=token, user=user_to_out(user))
 
 @app.post("/auth/refresh", response_model=TokenOut)
@@ -289,8 +473,9 @@ async def refresh_token(request: Request, response: Response):
         raise HTTPException(401, "refresh token revoked")
     
     # 필요하면 여기서 리프레시 토큰 회전(jti 새로 발급 & 쿠키 교체)
-    access = create_access_token({"sub": str(user["_id"])})
-    new_refresh = create_refresh_token({"sub": str(user["_id"]), "ver": user.get("token_version", 0)})
+    issued_at = datetime.now(timezone.utc)
+    access = create_access_token({"sub": str(user["_id"]), "iat": issued_at})
+    new_refresh = create_refresh_token({"sub": str(user["_id"]), "ver": user.get("token_version", 0), "iat": issued_at})
     response.set_cookie(
         "refresh_token",
         new_refresh,
