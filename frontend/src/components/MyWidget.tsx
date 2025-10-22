@@ -271,18 +271,37 @@ export function CassetteHeader({
 }
 
 // ● REC만 표시하는 LED
-function RecOnly() {
+function RecCornerBadge({ className = "" }: { className?: string }) {
   return (
-    <div className="flex h-16 items-center justify-center">
-      <div
-        className="text-[21px] font-bold tracking-[0.15em]"
-        style={{ fontFamily: FONT_STACKS.code }}
-      >
-        <span className="text-red-500 drop-shadow-[0_0_6px_rgba(255,0,0,0.8)]">• REC</span>
-      </div>
-    </div>
+    <span
+      role="status"
+      aria-live="polite"
+      className={clsx(
+        "pointer-events-none absolute z-10 select-none",
+        "text-red-500 rec-pulse", // 부드러운 맥동
+        "drop-shadow-[0_0_3px_rgba(255,0,0,0.5)]",
+        className
+      )}
+      style={{ fontFamily: '"NeoDunggeunmoCode", ui-monospace, monospace' }}
+    >
+      {/* 본문 */}
+      • REC
+
+      {/* 글리치 오버레이 3겹 → 더 자주 보이게 */}
+      <span aria-hidden className="absolute left-0 top-0 rec-glitch text-red-500/90 mix-blend-screen">• REC</span>
+      <span aria-hidden className="absolute left-0 top-0 rec-glitch-fast text-red-500/80 mix-blend-screen">• REC</span>
+      <span aria-hidden className="absolute left-0 top-0 rec-glitch-micro text-red-500/70 mix-blend-screen">• REC</span>
+
+      {/* ↑↓ 지직 노이즈 라인 2개 */}
+      <span aria-hidden className="rec-noise rec-noise-top" />
+      <span aria-hidden className="rec-noise rec-noise-bottom" />
+    </span>
   );
 }
+
+
+
+
 
 // 전송 버튼 묶음
 function TransportBar({
@@ -358,7 +377,7 @@ function ReelsInteractive({
   isRec: boolean;
 }) {
   const BASE_RPS = 0.25;            // 1×
-  const RETURN_RATE = 2.0;
+  const RETURN_RATE = 3.0;
   const FRICTION = 0.15;
   const MAX_OMEGA = 8 * Math.PI;
 
@@ -462,6 +481,7 @@ function ReelsInteractive({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
+      {isRec && <RecCornerBadge className="top-3 left-3 text-[18px] md:top-5 md:left-7" />}
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(120deg,transparent,rgba(255,255,255,.06),transparent)]" />
       <div className="grid grid-cols-2 items-center gap-4">
         <div ref={leftRef}>
@@ -752,6 +772,92 @@ function GlobalCassetteStyles() {
         0% { transform: translateX(0); } 
         100% { transform: translateX(-100%); } 
       }
+      
+      /* --- REC: 부드러운 맥동 --- */
+      .rec-pulse {
+        animation: recPulse 2.8s ease-in-out infinite;
+      }
+      @keyframes recPulse {
+        0%, 100% {
+          transform: none;
+          text-shadow: 0 0 1px rgba(255,0,0,0.25); /* 광량 최소화 */
+          opacity: 0.92;                      /* 살짝 어둡게 */
+        }
+        50% {
+          transform: scale(1.01);             /* 미세한 맥동만 */
+          text-shadow: 0 0 3px rgba(255,0,0,0.55); /* 약한 글로우 */
+          opacity: 1;
+        }
+      }
+
+      /* --- 글리치 베이스 키프레임: 짧게 여러 번 번쩍 --- */
+      @keyframes recGlitchBurst {
+        0%, 6%   { opacity: 0; transform: none; filter: none; }
+        6.5%     { opacity: .5; transform: translateY(-0.5px) skewX(6deg); filter: blur(.25px) contrast(1.1); }
+        7%       { opacity: 0; transform: none; filter: none; }
+
+        13%, 19% { opacity: 0; }
+        19.2%    { opacity: .35; transform: translateX(0.6px) skewY(-5deg); filter: blur(.2px) saturate(1.2); }
+        19.6%    { opacity: 0; transform: none; filter: none; }
+
+        37%, 43% { opacity: 0; }
+        43.3%    { opacity: .4; transform: translate(-0.4px, -0.3px) skewX(7deg); filter: blur(.25px) contrast(1.1); }
+        43.7%    { opacity: 0; transform: none; filter: none; }
+
+        61%, 66% { opacity: 0; }
+        66.1%    { opacity: .3; transform: translateY(0.4px) skewY(5deg); filter: blur(.2px); }
+        66.5%    { opacity: 0; transform: none; filter: none; }
+
+        84%, 89% { opacity: 0; }
+        89.2%    { opacity: .45; transform: translateX(-0.5px) skewX(-6deg); filter: blur(.25px) contrast(1.15); }
+        89.6%    { opacity: 0; transform: none; filter: none; }
+      }
+
+      /* --- 글리치 레벨(빈도) 3종: 주기 짧게 → 더 자주 --- */
+      .rec-glitch      { animation: recGlitchBurst 2.6s steps(1) infinite; }
+      .rec-glitch-fast { animation: recGlitchBurst 1.7s steps(1) infinite; animation-delay: .2s; }
+      .rec-glitch-micro{ animation: recGlitchBurst 1.1s steps(1) infinite; animation-delay: .55s; }
+
+      /* 위/아래 얇은 노이즈 바 공통 스타일 */
+      .rec-noise {
+        position: absolute;
+        left: 7px;
+        right: -10px;
+        height: 2px;                                  /* 얇은 라인 */
+        background:
+          linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(255,0,0,0.35) 18%,
+            rgba(255,255,255,0.85) 50%,
+            rgba(255,0,0,0.35) 82%,
+            transparent 100%
+          );
+        mix-blend-mode: screen;
+        filter: blur(0.35px) contrast(1.2);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .rec-noise-top    { top: 8px;    animation: recNoiseY 1.25s steps(8) infinite; }
+      .rec-noise-bottom { bottom: 9px; animation: recNoiseY 1.55s steps(10) infinite .25s; }
+
+      /* 위/아래로 툭툭 튀는 느낌: 짧게 나타났다 사라짐 */
+      @keyframes recNoiseY {
+        0%, 8%     { opacity: 0; transform: translateY(0); }
+        9%         { opacity: .65; transform: translateY(-1px); }
+        10%        { opacity: 0; transform: translateY(0); }
+
+        32%, 39%   { opacity: 0; transform: translateY(0); }
+        40%        { opacity: .55; transform: translateY(1px); }
+        41%        { opacity: 0; transform: translateY(0); }
+
+        68%, 74%   { opacity: 0; transform: translateY(0); }
+        75%        { opacity: .6; transform: translateY(-0.5px); }
+        76%        { opacity: 0; transform: translateY(0); }
+
+        92%        { opacity: .5; transform: translateY(0.6px); }
+        93%, 100%  { opacity: 0; transform: translateY(0); }
+      }
     `}</style>
   );
 }
@@ -793,8 +899,8 @@ function Marquee({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
 // 카세트 릴을 SVG로 표현한 회전 애니메이션입니다.
-// ⬇️ replace your existing Reel with this visual-only version
 export function ReelVisual({
   angleRad,
   ariaLabel,
