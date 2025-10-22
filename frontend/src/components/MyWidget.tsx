@@ -124,6 +124,12 @@ export default function MyWidget({
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
 
+  type TransportMode = "stop" | "play" | "double";
+
+  const BASE_RPS_CONST = 0.25; // your original base motor speed
+  const [transport, setTransport] = useState<TransportMode>("play");
+  const [isRec, setIsRec] = useState(false);
+
   const filtered = useMemo(() => {
     const scoped =
       filter === "all" ? posts : posts.filter((p) => p.tag === filter);
@@ -320,16 +326,167 @@ function FilterBar({
 }
 // 순수 시각적 요소인 카세트 릴 장식입니다.
 function CassettePanel() {
+    return <ReelsInteractive />;
+}
+
+/** Interactive cassette reels with motor + drag + inertia + sync */
+function ReelsInteractive() {
+  // physics params (tweak freely)
+  const BASE_RPS = 0.25;            // base rotation per second (revolutions)
+  const BASE_OMEGA = BASE_RPS * 2 * Math.PI; // rad/s (left reel +, right reel -)
+  const RETURN_RATE = 2.0;          // how fast we blend back to base speed (1/s)
+  const FRICTION = 0.15;            // passive damping when not dragging (1/s)
+  const MAX_OMEGA = 8 * Math.PI;    // clamp spin madness (rad/s)
+
+  // master angle/velocity (left reel). right reel mirrors it.
+  const [angle, setAngle] = useState(0);      // radians
+  const angleRef = useRef(angle);
+  const [omega, setOmega] = useState(BASE_OMEGA);
+  const omegaRef = useRef(omega);
+
+  // dragging state
+  const draggingRef = useRef<null | {
+    reel: "left" | "right";
+    centerX: number;
+    centerY: number;
+    prevPointerAngle: number; // screen angle last frame
+  }>(null);
+
+  const leftRef = useRef<HTMLDivElement | null>(null);
+  const rightRef = useRef<HTMLDivElement | null>(null);
+
+  // keep refs hot
+  useEffect(() => { angleRef.current = angle; }, [angle]);
+  useEffect(() => { omegaRef.current = omega; }, [omega]);
+
+  // rAF loop
+  useEffect(() => {
+    let raf = 0;
+    let prev = performance.now();
+
+    const tick = (now: number) => {
+      const dt = Math.max(0, Math.min(0.05, (now - prev) / 1000)); // clamp dt
+      prev = now;
+
+      const dragging = draggingRef.current;
+
+      let nextAngle = angleRef.current;
+      let nextOmega = omegaRef.current;
+
+      if (dragging) {
+        // while grabbing: follow pointer angle, compute instantaneous omega
+        // (we keep the master angle in left-reel space; right reel is mirrored)
+        const { centerX, centerY, reel, prevPointerAngle } = dragging;
+        const screenAngle = getPointerScreenAngle(latestPointerPos.x, latestPointerPos.y, centerX, centerY);
+
+        // unwrap delta to (-PI..PI)
+        let d = screenAngle - prevPointerAngle;
+        d = unwrapDelta(d);
+
+        dragging.prevPointerAngle = screenAngle; // update
+
+        // map to master space (right reel is mirrored)
+        const mapped = reel === "left" ? d : -d;
+
+        // integrate: angle follows pointer, omega from pointer velocity
+        nextAngle = nextAngle + mapped;
+        nextOmega = mapped / Math.max(1e-6, dt); // rad/s from last delta
+      } else {
+        // free run: apply damping + return-to-base-speed
+        const target = BASE_OMEGA; // base for left reel
+        const blend = 1 - Math.exp(-RETURN_RATE * dt); // exponential approach
+        nextOmega = nextOmega + (target - nextOmega) * blend;
+
+        // light friction so wild flicks decay
+        nextOmega *= Math.exp(-FRICTION * dt);
+
+        // integrate
+        nextAngle = nextAngle + nextOmega * dt;
+      }
+
+      // clamp absurd speeds
+      if (nextOmega >  MAX_OMEGA) nextOmega =  MAX_OMEGA;
+      if (nextOmega < -MAX_OMEGA) nextOmega = -MAX_OMEGA;
+
+      // commit
+      setAngle(nextAngle);
+      setOmega(nextOmega);
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // pointer tracking (we keep last pos globally to avoid extra listeners on window)
+  const latestPointerPos = useRef({ x: 0, y: 0 }).current;
+
+  // shared handlers
+  const onPointerDown = (reel: "left" | "right", ref: React.RefObject<HTMLDivElement>) =>
+    (e: React.PointerEvent) => {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      const rect = ref.current!.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+
+      latestPointerPos.x = e.clientX;
+      latestPointerPos.y = e.clientY;
+      const startAngle = getPointerScreenAngle(e.clientX, e.clientY, cx, cy);
+
+      draggingRef.current = {
+        reel,
+        centerX: cx,
+        centerY: cy,
+        prevPointerAngle: startAngle,
+      };
+    };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    latestPointerPos.x = e.clientX;
+    latestPointerPos.y = e.clientY;
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    // release: keep whatever omega the user imparted; rAF will ease to base
+    draggingRef.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
+  };
+
+  // render: right reel mirrors the left (angle/omega opposite)
+  const leftAngle = angle;
+  const rightAngle = -angle; // perfect sync, opposite direction
+
   return (
-    <div className="relative rounded-xl border border-[#343a40] bg-[#11161b] p-4">
+    <div
+      className="relative rounded-xl border border-[#343a40] bg-[#11161b] p-4"
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+    >
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(120deg,transparent,rgba(255,255,255,.06),transparent)]" />
       <div className="grid grid-cols-2 items-center gap-4">
-        <Reel />
-        <Reel reverse />
+        <div ref={leftRef}>
+          <ReelVisual
+            angleRad={leftAngle}
+            ariaLabel="Left reel"
+            onPointerDown={onPointerDown("left", leftRef)}
+          />
+        </div>
+        <div ref={rightRef}>
+          <ReelVisual
+            angleRad={rightAngle}
+            ariaLabel="Right reel"
+            onPointerDown={onPointerDown("right", rightRef)}
+          />
+        </div>
       </div>
+
       <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[10px] text-[#B9B1A3]">
         <span>REEL A</span>
-        <span>MECHANISM</span>
+        <span>CASSETTE-Ver.AJ</span>
         <span>REEL B</span>
       </div>
       <div className="mt-3 rounded-md bg-[#E6DFD3] p-2 text-center text-xs font-semibold text-[#0e1214]">
@@ -337,6 +494,17 @@ function CassettePanel() {
       </div>
     </div>
   );
+
+  // --- helpers ---
+  function getPointerScreenAngle(px: number, py: number, cx: number, cy: number) {
+    return Math.atan2(py - cy, px - cx);
+  }
+  function unwrapDelta(d: number) {
+    // map to (-PI..PI) so fast drag across 180° doesn't jump
+    if (d > Math.PI) d -= 2 * Math.PI;
+    if (d < -Math.PI) d += 2 * Math.PI;
+    return d;
+  }
 }
 
 interface ComposerSectionProps {
@@ -598,9 +766,6 @@ function GlobalCassetteStyles() {
         0% { transform: translateX(0); } 
         100% { transform: translateX(-100%); } 
       }
-      .reel-spin { animation: reel 9s linear infinite; transform-origin: 50% 50%; }
-      .reel-spin.reverse { animation-direction: reverse; }
-      @keyframes reel { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
     `}</style>
   );
 }
@@ -643,52 +808,75 @@ function Marquee({ children }: { children: React.ReactNode }) {
   );
 }
 // 카세트 릴을 SVG로 표현한 회전 애니메이션입니다.
-export function Reel({ reverse = false }: { reverse?: boolean }) {
+// ⬇️ replace your existing Reel with this visual-only version
+export function ReelVisual({
+  angleRad,
+  ariaLabel,
+  onPointerDown,
+}: {
+  angleRad: number;
+  ariaLabel?: string;
+  onPointerDown?: (e: React.PointerEvent) => void;
+}) {
   return (
-    <div className="relative mx-auto aspect-square w-36 rounded-full border border-[#2e343a] bg-[#0f1419] p-3 shadow-inner">
-      <svg viewBox="0 0 100 100" className={clsx("reel-spin", reverse && "reverse")}>
-        <circle cx="50" cy="50" r="45" fill="#0f1419" stroke="#3a3f45" strokeWidth="2" />
-        {[...Array(6)].map((_, i) => {
-          const angle = (i * Math.PI) / 3;
-          const x = 50 + 35 * Math.cos(angle);
-          const y = 50 + 35 * Math.sin(angle);
-          return (
-            <line
-              key={i}
-              x1="50"
-              y1="50"
-              x2={x}
-              y2={y}
-              stroke="#E6DFD3"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-          );
-        })}
-        <circle cx="50" cy="50" r="6" fill="#E6DFD3" />
-        {[...Array(24)].map((_, i) => {
-          const angle = (i * Math.PI) / 12;
-          const x1 = 50 + 42 * Math.cos(angle);
-          const y1 = 50 + 42 * Math.sin(angle);
-          const x2 = 50 + 45 * Math.cos(angle);
-          const y2 = 50 + 45 * Math.sin(angle);
-          return (
-            <line
-              key={i}
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke="#B9B1A3"
-              strokeWidth="1"
-            />
-          );
-        })}
-      </svg>
+    <div
+      className="relative mx-auto aspect-square w-36 rounded-full border border-[#2e343a] bg-[#0f1419] p-3 shadow-inner touch-none"
+      role="slider"
+      aria-label={ariaLabel}
+      onPointerDown={onPointerDown}
+    >
+      <div
+        className="will-change-transform"
+        style={{
+          transform: `rotate(${angleRad}rad)`,
+          transformOrigin: "50% 50%",
+        }}
+      >
+        <svg viewBox="0 0 100 100" className="block w-full h-full">
+          <circle cx="50" cy="50" r="45" fill="#0f1419" stroke="#3a3f45" strokeWidth="2" />
+          {Array.from({ length: 6 }).map((_, i) => {
+            const angle = (i * Math.PI) / 3;
+            const x = 50 + 35 * Math.cos(angle);
+            const y = 50 + 35 * Math.sin(angle);
+            return (
+              <line
+                key={i}
+                x1="50"
+                y1="50"
+                x2={x}
+                y2={y}
+                stroke="#E6DFD3"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            );
+          })}
+          <circle cx="50" cy="50" r="6" fill="#E6DFD3" />
+          {Array.from({ length: 24 }).map((_, i) => {
+            const angle = (i * Math.PI) / 12;
+            const x1 = 50 + 42 * Math.cos(angle);
+            const y1 = 50 + 42 * Math.sin(angle);
+            const x2 = 50 + 45 * Math.cos(angle);
+            const y2 = 50 + 45 * Math.sin(angle);
+            return (
+              <line
+                key={i}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke="#B9B1A3"
+                strokeWidth="1"
+              />
+            );
+          })}
+        </svg>
+      </div>
       <div className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.12),transparent_50%)]" />
     </div>
   );
 }
+
 
 
 // 판넬 곳곳에 쓰이는 나사 머리 장식입니다.
